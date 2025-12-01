@@ -1,0 +1,6 @@
+#ifndef BAREMETAL_KERNEL_CONFIG_H
+#define BAREMETAL_KERNEL_CONFIG_H
+
+#include "log_config.h"
+
+#endif //BAREMETAL_KERNEL_CONFIG_H
