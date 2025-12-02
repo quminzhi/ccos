@@ -2,13 +2,8 @@
 #include <stdint.h>
 #include "platform.h"
 #include "log.h"
-
-/* 每次 timer 中断打印 tick，并安排下一次定时器 */
-static void kernel_timer_tick(void)
-{
-  pr_info("timer tick");
-  platform_timer_start_after(10000000UL); // 大约 1s
-}
+#include "trap.h"
+#include "arch.h"
 
 /*
  * S 模式入口：OpenSBI 会以 S-mode 跳到 _start，
@@ -19,11 +14,11 @@ void kernel_main(long hartid, long dtb_pa)
   (void)hartid;
   (void)dtb_pa;
 
-  /* 初始化平台：trap / 中断 / 注册 timer handler */
-  platform_init(kernel_timer_tick);
-
-  /* 初始化日志系统（S 模式 bare-metal 版） */
+  platform_early_init();
   log_init_baremetal();
+  trap_init();
+  arch_enable_timer_interrupts();
+
   pr_info("hello from S-mode, hart=%ld", hartid);
 
   /* 启动第一次定时器 */

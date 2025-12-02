@@ -3,4 +3,6 @@
 
 #include "log_config.h"
 
+#define KERNEL_STACK_SIZE 4096
+
 #endif //BAREMETAL_KERNEL_CONFIG_H

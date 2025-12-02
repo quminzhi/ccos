@@ -143,6 +143,10 @@ typedef enum {
   LOG_PATH_FULL = 2,     /* print full __FILE__ string */
 } log_path_mode_t;
 
+#ifndef LOG_DEFAULT_PATH_MODE
+#define LOG_DEFAULT_PATH_MODE LOG_PATH_BASENAME
+#endif // LOG_DEFAULT_PATH_MODE
+
 /* Enable/disable timestamp support. */
 #ifndef LOG_ENABLE_TIMESTAMP
 #define LOG_ENABLE_TIMESTAMP 1

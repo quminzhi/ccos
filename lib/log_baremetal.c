@@ -26,7 +26,7 @@ void log_init_baremetal(void)
   log_set_level(LOG_RUNTIME_DEFAULT_LEVEL);
 
   /* 3. 路径模式：只打印文件名 basename，比较清爽 */
-  log_set_path_mode(LOG_PATH_BASENAME);
+  log_set_path_mode(LOG_DEFAULT_PATH_MODE);
 
 #if LOG_ENABLE_TIMESTAMP
   /* 4. 挂上 timestamp 提供函数（可选） */

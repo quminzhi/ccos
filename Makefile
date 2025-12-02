@@ -32,6 +32,7 @@ PLATFORM := qemu-virt-sbi
 
 TARGET   := kernel.elf
 DUMP     := $(TARGET:.elf=.dump)
+KMAP     := $(TARGET:.elf=.map)
 
 # 链接脚本命名规则：linker/<arch>-<board>.ld
 LINKER_SCRIPT := linker/$(ARCH)-$(BOARD).ld
@@ -48,12 +49,15 @@ LIB_DIR      := lib
 # 架构相关 (启动 & trap 入口)
 ARCH_SRCS := \
   $(ARCH_DIR)/start.S \
-  $(ARCH_DIR)/trap.S
+  $(ARCH_DIR)/trap.S \
+  $(ARCH_DIR)/arch.c
+
 
 # 内核层 (目前只有 main，将来会增加 sched.c / thread.c / trap.c / timer.c 等)
 KERNEL_SRCS := \
   $(KERNEL_DIR)/main.c \
-  $(KERNEL_DIR)/trap.c
+  $(KERNEL_DIR)/trap.c \
+  $(KERNEL_DIR)/klib.c
 
 # 通用库 (log 系统 & baremetal 绑定)
 LIB_SRCS := \
@@ -92,17 +96,20 @@ CFLAGS := \
   -mcmodel=medany \
   $(INCLUDE_DIRS)
 
+CFLAGS += -include kernel_config.h
+
 LDFLAGS := \
   -nostdlib -nostartfiles -ffreestanding \
   -Wl,-T,$(LINKER_SCRIPT) \
-  -Wl,--gc-sections
+  -Wl,--gc-sections \
+	-Wl,-Map,$(KMAP)
 
 # ---------------------------------------------------------------------------
 # QEMU 运行配置
 # ---------------------------------------------------------------------------
 
 QEMU      ?= qemu-system-riscv64
-QEMU_OPTS ?= -machine virt -nographic -bios default
+QEMU_OPTS ?= -machine virt -nographic -bios default -m 128M
 
 QEMU_GDB_PORT ?= 1234
 
@@ -160,4 +167,4 @@ debug-sources:
 
 clean:
 	@echo "  CLEAN"
-	rm -f $(OBJS) $(TARGET) $(DUMP)
+	rm -f $(OBJS) $(TARGET) $(DUMP) $(KMAP)

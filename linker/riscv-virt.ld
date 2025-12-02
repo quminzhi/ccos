@@ -1,40 +1,63 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
-/* 定义程序头（Program Headers），控制 LOAD 段的权限 */
 PHDRS
 {
-  text PT_LOAD FLAGS(5); /* R | X = 0b101 */
-  data PT_LOAD FLAGS(6); /* R | W = 0b110 */
+  text PT_LOAD FLAGS(5); /* R | X */
+  data PT_LOAD FLAGS(6); /* R | W */
 }
+
+/*
+ * QEMU virt + -bios default (OpenSBI) + -m 128M
+ * DRAM: 0x8000_0000 .. 0x8800_0000
+ * payload 常用起点: 0x8020_0000
+ */
+MEMORY
+{
+  RAM (rwx) : ORIGIN = 0x80200000, LENGTH = 0x07E00000 /* 126 MiB */
+}
+
+STACK_SIZE = 0x1000;  /* 4KB */
 
 SECTIONS
 {
-  . = 0x80200000;
+  . = ORIGIN(RAM);
 
-  /* 代码 + 只读数据，放到 text 段（RX） */
   .text : ALIGN(4)
   {
-    *(.text.entry)
+    KEEP(*(.text.entry))
     *(.text .text.*)
-  } :text
+  } > RAM :text
 
   .rodata : ALIGN(4)
   {
     *(.rodata .rodata.*)
-  } :text
+  } > RAM :text
 
-  /* 可写数据，放到 data 段（RW） */
-  .data : ALIGN(4)
+  .data : ALIGN(16)
   {
+    __data_start = .;
     *(.data .data.*)
-  } :data
+    *(.sdata .sdata.*)
+    __data_end = .;
+  } > RAM :data
 
-  .bss : ALIGN(4)
+  .bss (NOLOAD) : ALIGN(16)
   {
     __bss_start = .;
     *(.bss .bss.*)
+    *(.sbss .sbss.*)
     *(COMMON)
     __bss_end = .;
-  } :data
+  } > RAM :data
+
+  /* 程序镜像末尾（bss 后面） */
+  __image_end = .;
+
+  /* 栈放在 RAM 顶端（只定义符号，不建输出段） */
+  __stack_top    = ORIGIN(RAM) + LENGTH(RAM);
+  __stack_bottom = __stack_top - STACK_SIZE;
+
+  /* 关键：保证段布局不会撞到栈 */
+  ASSERT(__image_end <= __stack_bottom, "RAM overflow: sections overlap stack")
 }
