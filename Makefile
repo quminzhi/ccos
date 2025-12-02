@@ -20,6 +20,7 @@ CROSS_PREFIX ?= riscv64-unknown-elf-
 CC      := $(CROSS_PREFIX)gcc
 LD      := $(CROSS_PREFIX)gcc
 OBJDUMP := $(CROSS_PREFIX)objdump
+GDB     := gdb-multiarch
 
 # ---------------------------------------------------------------------------
 # 目标配置
@@ -103,6 +104,8 @@ LDFLAGS := \
 QEMU      ?= qemu-system-riscv64
 QEMU_OPTS ?= -machine virt -nographic -bios default
 
+QEMU_GDB_PORT ?= 1234
+
 # ---------------------------------------------------------------------------
 # 规则
 # ---------------------------------------------------------------------------
@@ -132,16 +135,28 @@ dump: $(TARGET)
 	@echo "Disassembly written to $(DUMP)"
 
 # 启动 QEMU + OpenSBI，在 S 模式运行内核
-run: $(TARGET)
+qemu: $(TARGET)
 	@echo "  QEMU  $(TARGET)"
 	$(QEMU) $(QEMU_OPTS) -kernel $(TARGET)
 
-# 打印当前参与构建的源文件 (调试用)
+# 调试运行：QEMU 不跑、挂起在 reset，开放 GDB 端口
+qemu-dbg: $(TARGET)
+	@echo "  QEMU-DBG  $(TARGET) (gdb on port $(QEMU_GDB_PORT))"
+	$(QEMU) $(QEMU_OPTS) -S -gdb tcp::$(QEMU_GDB_PORT) -kernel $(TARGET)
+
+# 在另一个终端里启动 GDB 并连接 QEMU
+gdb: $(TARGET)
+	@echo "  GDB   $(TARGET) (target remote :$(QEMU_GDB_PORT))"
+	$(GDB) $(TARGET) -ex "target remote :$(QEMU_GDB_PORT)"
+
+# 打印当前参与构建的源文件 (调试 Makefile 用)
 debug-sources:
 	@echo "ARCH_SRCS     = $(ARCH_SRCS)"
 	@echo "PLATFORM_SRCS = $(PLATFORM_SRCS)"
 	@echo "KERNEL_SRCS   = $(KERNEL_SRCS)"
 	@echo "LIB_SRCS      = $(LIB_SRCS)"
+	@echo "SRCS          = $(SRCS)"
+	@echo "OBJS          = $(OBJS)"
 
 clean:
 	@echo "  CLEAN"
