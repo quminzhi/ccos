@@ -49,8 +49,8 @@
 #   1. 在“当前 SP”（用户栈）上分配 trapframe，保存所有 GPR + CSR
 #   2. 用 s0 记录 trapframe 指针
 #   3. 从 sscratch 取出“内核栈顶”，切换到内核栈
-#   4. 调用 C: uintptr_t trap_handler(struct trapframe *tf)
-#   5. 用 trap_handler 返回的新 sepc + trapframe 内容恢复用户上下文
+#   4. 调用 C: uintptr_t trap_entry_c(struct trapframe *tf)
+#   5. 用 trap_entry_c 返回的新 sepc + trapframe 内容恢复用户上下文
 #   6. sret 回到用户线程（用它自己的用户栈）
 
 trap_entry:

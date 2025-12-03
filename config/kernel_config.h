@@ -4,5 +4,7 @@
 #include "log_config.h"
 
 #define KERNEL_STACK_SIZE 4096
+#define THREAD_STACK_SIZE 4096
+#define THREAD_MAX 10
 
 #endif //BAREMETAL_KERNEL_CONFIG_H

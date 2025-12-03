@@ -44,20 +44,27 @@ LINKER_SCRIPT := linker/$(ARCH)-$(BOARD).ld
 ARCH_DIR     := arch/$(ARCH)
 PLATFORM_DIR := platform/$(PLATFORM)
 KERNEL_DIR   := kernel
+USER_DIR     := user
 LIB_DIR      := lib
 
 # 架构相关 (启动 & trap 入口)
 ARCH_SRCS := \
   $(ARCH_DIR)/start.S \
   $(ARCH_DIR)/trap.S \
-  $(ARCH_DIR)/arch.c
+  $(ARCH_DIR)/arch.c \
+  $(ARCH_DIR)/user.S
 
 
 # 内核层 (目前只有 main，将来会增加 sched.c / thread.c / trap.c / timer.c 等)
 KERNEL_SRCS := \
   $(KERNEL_DIR)/main.c \
   $(KERNEL_DIR)/trap.c \
-  $(KERNEL_DIR)/klib.c
+  $(KERNEL_DIR)/klib.c \
+  $(KERNEL_DIR)/thread.c \
+  $(KERNEL_DIR)/syscall.c
+
+USER_SRCS := \
+  $(USER_DIR)/main.c
 
 # 通用库 (log 系统 & baremetal 绑定)
 LIB_SRCS := \
@@ -70,7 +77,7 @@ PLATFORM_SRCS := \
   $(PLATFORM_DIR)/uart_16550.c
 
 
-SRCS := $(ARCH_SRCS) $(PLATFORM_SRCS) $(KERNEL_SRCS) $(LIB_SRCS)
+SRCS := $(ARCH_SRCS) $(PLATFORM_SRCS) $(KERNEL_SRCS) $(USER_SRCS) $(LIB_SRCS)
 OBJS := $(SRCS:.c=.o)
 OBJS := $(OBJS:.S=.o)
 
@@ -92,7 +99,7 @@ INCLUDE_DIRS := \
 CFLAGS := \
   -march=rv64ima_zicsr -mabi=lp64 \
   -nostdlib -nostartfiles -ffreestanding -fno-builtin \
-  -Wall -Wextra -O2 -g \
+  -Wall -Wextra -O0 -g \
   -mcmodel=medany \
   $(INCLUDE_DIRS)
 
@@ -119,7 +126,7 @@ QEMU_GDB_PORT ?= 1234
 
 .PHONY: all clean run dump debug-sources
 
-all: $(TARGET)
+all: $(TARGET) dump
 
 $(TARGET): $(OBJS)
 	@echo "  LD    $@"
@@ -167,4 +174,4 @@ debug-sources:
 
 clean:
 	@echo "  CLEAN"
-	rm -f $(OBJS) $(TARGET) $(DUMP) $(KMAP)
+	rm -f $(OBJS) $(TARGET) $(KMAP)

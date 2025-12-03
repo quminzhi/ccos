@@ -47,6 +47,4 @@ struct trapframe {
 void trap_init(void);
 uintptr_t trap_entry_c(struct trapframe* tf);
 
-void kernel_timer_tick(void);
-
 #endif

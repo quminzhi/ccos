@@ -60,7 +60,7 @@ void uart16550_puts(const char *s)
   }
 }
 
-static void uart16550_put_hex64(uint64_t x)
+void uart16550_put_hex64(uint64_t x)
 {
   for (int i = 60; i >= 0; i -= 4) {
     uint8_t nib = (x >> i) & 0xF;

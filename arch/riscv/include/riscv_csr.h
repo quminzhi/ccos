@@ -20,11 +20,13 @@ typedef uint32_t reg_t;
 typedef uint64_t reg_t;
 #define RISCV_XLEN 64
 #define MCAUSE_INT (1ULL << 63)
+#define SCAUSE_INT (1ULL << 63)
 #else
 #error "Unsupported __riscv_xlen (only 32/64 are supported)"
 #endif
 
 #define MCAUSE_CODE_MASK (MCAUSE_INT - 1u)
+#define SCAUSE_CODE_MASK (SCAUSE_INT - 1u)
 
 /*
  * 帮助函数：判断中断/异常 + 取出 code
@@ -40,6 +42,16 @@ static inline int mcause_is_interrupt(reg_t mcause)
 static inline reg_t mcause_code(reg_t mcause)
 {
   return (mcause & MCAUSE_CODE_MASK);
+}
+
+static inline int scause_is_interrupt(reg_t scause)
+{
+  return (scause & SCAUSE_INT) != 0;
+}
+
+static inline reg_t scause_code(reg_t scause)
+{
+  return (scause & SCAUSE_CODE_MASK);
 }
 
 /* ===================== mstatus bits ===================== */

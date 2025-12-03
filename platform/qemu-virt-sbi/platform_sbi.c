@@ -11,7 +11,7 @@
 
 // platform_sbi.c 里加一个小工具，用 platform_write 打 hex
 
-static void platform_put_hex64(uint64_t x)
+void platform_put_hex64(uint64_t x)
 {
   char buf[2 + 16 + 1];  // "0x" + 16 hex + '\0'
   int pos = 0;
@@ -38,6 +38,10 @@ void platform_write(const char* buf, size_t len)
   uart16550_write(buf, len);
 }
 
+void platform_putc(char c) {
+  uart16550_putc(c);
+}
+
 void platform_puts(const char* s)
 {
   if (!s)
@@ -48,7 +52,8 @@ void platform_puts(const char* s)
 
 void platform_idle(void)
 {
-  __asm__ volatile("wfi");
+  __asm__ volatile("nop");
+  // __asm__ volatile("wfi");
 }
 
 /* ========== 2. 定时器相关 ========== */

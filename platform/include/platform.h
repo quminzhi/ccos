@@ -15,8 +15,10 @@ typedef uint64_t platform_time_t;
 void platform_early_init();
 
 /* 输出字符串（当前实现：直接用 QEMU virt 的 UART0 MMIO） */
+void platform_putc(char c);
 void platform_puts(const char *s);
 void platform_write(const char *buf, size_t len);
+void platform_put_hex64(uint64_t x);
 
 /* 让 CPU idle，一般就是 wfi */
 void platform_idle(void);
