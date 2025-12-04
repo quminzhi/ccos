@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+#define ADVANCE_SEPC()   \
+  do {                   \
+    tf->sepc = sepc + 4; \
+  } while (0)
+
 struct trapframe {
   uintptr_t ra;
   uintptr_t sp;

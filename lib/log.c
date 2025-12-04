@@ -8,9 +8,9 @@
  *  INTERNAL STATE
  * ============================================================ */
 
-static log_write_fn_t s_write_fn        = 0;
-static volatile log_level_t s_log_level = LOG_RUNTIME_DEFAULT_LEVEL;
-static volatile log_path_mode_t s_path_mode = LOG_PATH_FULL;
+static log_write_fn_t s_write_fn            = 0;
+static volatile log_level_t s_log_level     = LOG_RUNTIME_DEFAULT_LEVEL;
+static volatile log_path_mode_t s_path_mode = LOG_DEFAULT_PATH_MODE;
 
 #if LOG_ENABLE_TIMESTAMP
 static log_timestamp_fn_t s_ts_fn = 0;
@@ -26,14 +26,14 @@ static size_t s_ring_size = 0; /* used bytes */
  *  SMALL INTERNAL HELPERS
  * ============================================================ */
 
-static void log_append_char(char* buf, int *pos, int max, char c)
+static void log_append_char(char* buf, int* pos, int max, char c)
 {
   if (*pos < max - 1) {
     buf[(*pos)++] = c;
   }
 }
 
-static void log_append_str(char* buf, int *pos, int max, const char* s)
+static void log_append_str(char* buf, int* pos, int max, const char* s)
 {
   if (!s) {
     s = "(null)";
@@ -43,14 +43,8 @@ static void log_append_str(char* buf, int *pos, int max, const char* s)
   }
 }
 
-static void log_append_uint(char* buf,
-                            int *pos,
-                            int max,
-                            unsigned long long v,
-                            unsigned base,
-                            bool upper,
-                            int width,
-                            char pad)
+static void log_append_uint(char* buf, int* pos, int max, unsigned long long v,
+                            unsigned base, bool upper, int width, char pad)
 {
   char tmp[32];
   int idx = 0;
@@ -72,8 +66,7 @@ static void log_append_uint(char* buf,
   }
 
   int num_digits = idx;
-  if (width < num_digits)
-    width = num_digits;
+  if (width < num_digits) width = num_digits;
 
   int pad_count = width - num_digits;
   while (pad_count-- > 0 && *pos < max - 1) {
@@ -85,14 +78,12 @@ static void log_append_uint(char* buf,
   }
 }
 
-
 /* Very small printf-like formatter.
  * Supported:
  *   %s, %c, %d/%i, %u, %x/%X, %p, %%
- * No width/precision flags are handled.
+ * Width & '0' pad supported, ll/ld/lu 也支持。
  */
-static int log_vformat(char* dst, int dst_size,
-                       const char* fmt, va_list ap)
+static int log_vformat(char* dst, int dst_size, const char* fmt, va_list ap)
 {
   int pos = 0;
 
@@ -108,7 +99,7 @@ static int log_vformat(char* dst, int dst_size,
       continue;
     }
 
-    char pad = ' ';
+    char pad  = ' ';
     int width = 0;
 
     if (*p == '0') {
@@ -121,7 +112,7 @@ static int log_vformat(char* dst, int dst_size,
       ++p;
     }
 
-    int len_mod = 0;  /* 0: 默认(int), 1: long, 2: long long */
+    int len_mod = 0; /* 0: int, 1: long, 2: long long */
     if (*p == 'l') {
       ++p;
       len_mod = 1;
@@ -135,7 +126,7 @@ static int log_vformat(char* dst, int dst_size,
 
     switch (spec) {
       case 's': {
-        const char* s = va_arg(ap, const char *);
+        const char* s = va_arg(ap, const char*);
         log_append_str(dst, &pos, dst_size, s);
         break;
       }
@@ -147,11 +138,11 @@ static int log_vformat(char* dst, int dst_size,
       case 'd':
       case 'i': {
         long long v;
-        if (len_mod == 2) {           /* %lld */
+        if (len_mod == 2) { /* %lld */
           v = va_arg(ap, long long);
-        } else if (len_mod == 1) {    /* %ld */
+        } else if (len_mod == 1) { /* %ld */
           v = va_arg(ap, long);
-        } else {                      /* %d */
+        } else { /* %d */
           v = va_arg(ap, int);
         }
 
@@ -159,8 +150,7 @@ static int log_vformat(char* dst, int dst_size,
         if (v < 0) {
           log_append_char(dst, &pos, dst_size, '-');
           u = (unsigned long long)(-v);
-          if (width > 0)
-            width--;    /* one char used by '-' */
+          if (width > 0) width--; /* one char used by '-' */
         } else {
           u = (unsigned long long)v;
         }
@@ -169,15 +159,15 @@ static int log_vformat(char* dst, int dst_size,
       }
       case 'u': {
         unsigned long long v;
-        if (len_mod == 2) {             /* %llu */
+        if (len_mod == 2) { /* %llu */
           v = va_arg(ap, unsigned long long);
-        } else if (len_mod == 1) {      /* %lu */
+        } else if (len_mod == 1) { /* %lu */
           v = va_arg(ap, unsigned long);
-        } else {                        /* %u */
+        } else { /* %u */
           v = va_arg(ap, unsigned int);
         }
-        log_append_uint(dst, &pos, dst_size,
-                        (unsigned long long)v, 10, false, width, pad);
+        log_append_uint(dst, &pos, dst_size, (unsigned long long)v, 10, false,
+                        width, pad);
         break;
       }
       case 'x':
@@ -190,16 +180,16 @@ static int log_vformat(char* dst, int dst_size,
         } else {
           v = va_arg(ap, unsigned int);
         }
-        log_append_uint(dst, &pos, dst_size,
-                        (unsigned long long)v, 16, (spec == 'X'), width, pad);
+        log_append_uint(dst, &pos, dst_size, (unsigned long long)v, 16,
+                        (spec == 'X'), width, pad);
         break;
       }
       case 'p': {
-        void* ptr = va_arg(ap, void *);
+        void* ptr = va_arg(ap, void*);
         log_append_str(dst, &pos, dst_size, "0x");
         uintptr_t v = (uintptr_t)ptr;
-        log_append_uint(dst, &pos, dst_size,
-                        (unsigned long long)v, 16, false, 0, ' ');
+        log_append_uint(dst, &pos, dst_size, (unsigned long long)v, 16, false,
+                        0, ' ');
         break;
       }
       default:
@@ -215,40 +205,21 @@ static int log_vformat(char* dst, int dst_size,
 }
 
 /* Tiny local printable check (no libc isprint dependency). */
-static int log_isprint(unsigned char c)
-{
-  return (c >= 0x20u && c <= 0x7Eu);
-}
+static int log_isprint(unsigned char c) { return (c >= 0x20u && c <= 0x7Eu); }
 
 /* ============================================================
  *  PUBLIC API
  * ============================================================ */
 
-void log_init(log_write_fn_t fn)
-{
-  s_write_fn = fn;
-}
+void log_init(log_write_fn_t fn) { s_write_fn = fn; }
 
-void log_set_level(log_level_t level)
-{
-  s_log_level = level;
-}
+void log_set_level(log_level_t level) { s_log_level = level; }
 
-log_level_t log_get_level(void)
-{
-  return s_log_level;
-}
+log_level_t log_get_level(void) { return s_log_level; }
 
-  void log_set_path_mode(log_path_mode_t mode)
-{
-  s_path_mode = mode;
-}
+void log_set_path_mode(log_path_mode_t mode) { s_path_mode = mode; }
 
-  log_path_mode_t log_get_path_mode(void)
-{
-  return s_path_mode;
-}
-
+log_path_mode_t log_get_path_mode(void) { return s_path_mode; }
 
 const char* log_level_to_string(log_level_t level)
 {
@@ -269,17 +240,13 @@ const char* log_level_to_string(log_level_t level)
 }
 
 #if LOG_ENABLE_TIMESTAMP
-void log_set_timestamp_fn(log_timestamp_fn_t fn)
-{
-  s_ts_fn = fn;
-}
+void log_set_timestamp_fn(log_timestamp_fn_t fn) { s_ts_fn = fn; }
 #endif
 
 #if LOG_USE_RING_BUFFER
 static void ring_write(const char* data, size_t len)
 {
-  if (len == 0)
-    return;
+  if (len == 0) return;
 
   if (len > LOG_RING_BUFFER_SIZE) {
     data += (len - LOG_RING_BUFFER_SIZE);
@@ -300,12 +267,8 @@ static void ring_write(const char* data, size_t len)
 }
 #endif /* LOG_USE_RING_BUFFER */
 
-int log_vprintf(log_level_t level,
-                const char* file,
-                int line,
-                const char* func,
-                const char* fmt,
-                va_list ap)
+int log_vprintf(log_level_t level, const char* file, int line, const char* func,
+                const char* fmt, va_list ap)
 {
   char buf[LOG_BUFFER_SIZE];
   int pos = 0;
@@ -325,8 +288,8 @@ int log_vprintf(log_level_t level,
   if (s_ts_fn) {
     uint32_t ts = s_ts_fn();
     log_append_char(buf, &pos, LOG_BUFFER_SIZE, '[');
-    log_append_uint(buf, &pos, LOG_BUFFER_SIZE,
-                    (unsigned long long)ts, 10, false, 0, ' ');
+    log_append_uint(buf, &pos, LOG_BUFFER_SIZE, (unsigned long long)ts, 10,
+                    false, 0, ' ');
     log_append_char(buf, &pos, LOG_BUFFER_SIZE, ']');
     log_append_char(buf, &pos, LOG_BUFFER_SIZE, ' ');
   }
@@ -334,8 +297,7 @@ int log_vprintf(log_level_t level,
 
   /* Level + location prefix: "[I] file:line func(): " */
   log_append_char(buf, &pos, LOG_BUFFER_SIZE, '[');
-  log_append_str(buf, &pos, LOG_BUFFER_SIZE,
-                 log_level_to_string(level));
+  log_append_str(buf, &pos, LOG_BUFFER_SIZE, log_level_to_string(level));
   log_append_char(buf, &pos, LOG_BUFFER_SIZE, ']');
   log_append_char(buf, &pos, LOG_BUFFER_SIZE, ' ');
 
@@ -355,8 +317,8 @@ int log_vprintf(log_level_t level,
 
     log_append_str(buf, &pos, LOG_BUFFER_SIZE, file_to_print);
     log_append_char(buf, &pos, LOG_BUFFER_SIZE, ':');
-    log_append_uint(buf, &pos, LOG_BUFFER_SIZE,
-                    (unsigned long long)line, 10, false, 0, ' ');
+    log_append_uint(buf, &pos, LOG_BUFFER_SIZE, (unsigned long long)line, 10,
+                    false, 0, ' ');
     log_append_char(buf, &pos, LOG_BUFFER_SIZE, ' ');
   }
 
@@ -366,10 +328,7 @@ int log_vprintf(log_level_t level,
   }
 
   /* Message body */
-  pos += log_vformat(buf + pos,
-                     LOG_BUFFER_SIZE - pos,
-                     fmt,
-                     ap);
+  pos += log_vformat(buf + pos, LOG_BUFFER_SIZE - pos, fmt, ap);
 
   if (pos < LOG_BUFFER_SIZE - 1) {
     buf[pos++] = '\n';
@@ -391,12 +350,8 @@ int log_vprintf(log_level_t level,
   return pos;
 }
 
-int log_printf(log_level_t level,
-               const char* file,
-               int line,
-               const char* func,
-               const char* fmt,
-               ...)
+int log_printf(log_level_t level, const char* file, int line, const char* func,
+               const char* fmt, ...)
 {
   int ret;
   va_list ap;
@@ -412,15 +367,9 @@ int log_printf(log_level_t level,
 
 #if LOG_USE_RING_BUFFER
 
-size_t log_ring_size(void)
-{
-  return s_ring_size;
-}
+size_t log_ring_size(void) { return s_ring_size; }
 
-size_t log_ring_capacity(void)
-{
-  return LOG_RING_BUFFER_SIZE;
-}
+size_t log_ring_capacity(void) { return LOG_RING_BUFFER_SIZE; }
 
 void log_ring_clear(void)
 {
@@ -431,12 +380,11 @@ void log_ring_clear(void)
 
 static size_t ring_peek_internal(char* out, size_t maxlen)
 {
-  if (s_ring_size == 0 || maxlen == 0)
-    return 0;
+  if (s_ring_size == 0 || maxlen == 0) return 0;
 
   size_t to_read = (s_ring_size < maxlen) ? s_ring_size : maxlen;
-  size_t tail    = (s_ring_head + LOG_RING_BUFFER_SIZE - s_ring_size)
-                % LOG_RING_BUFFER_SIZE;
+  size_t tail =
+      (s_ring_head + LOG_RING_BUFFER_SIZE - s_ring_size) % LOG_RING_BUFFER_SIZE;
 
   for (size_t i = 0; i < to_read; ++i) {
     size_t idx = (tail + i) % LOG_RING_BUFFER_SIZE;
@@ -473,16 +421,11 @@ size_t log_ring_read(char* out, size_t maxlen)
  *  HEXDUMP
  * ============================================================ */
 
-void log_hexdump(log_level_t level,
-                 const char* file,
-                 int line,
-                 const char* func,
-                 const void* data,
-                 size_t len,
+void log_hexdump(log_level_t level, const char* file, int line,
+                 const char* func, const void* data, size_t len,
                  const char* prefix)
 {
-  if (level <= LOG_LEVEL_OFF || level > s_log_level)
-    return;
+  if (level <= LOG_LEVEL_OFF || level > s_log_level) return;
 
   const uint8_t* p = (const uint8_t*)data;
   size_t offset    = 0;
@@ -492,8 +435,7 @@ void log_hexdump(log_level_t level,
 
   while (offset < len) {
     size_t chunk = len - offset;
-    if (chunk > 16)
-      chunk = 16;
+    if (chunk > 16) chunk = 16;
 
     int hpos = 0;
     for (size_t i = 0; i < chunk; ++i) {
@@ -510,13 +452,34 @@ void log_hexdump(log_level_t level,
     asciibuf[chunk] = '\0';
 
     /* Note: no width on %X because our formatter doesn't handle %04X. */
-    log_printf(level, file, line, func,
-               "%s%X: %s |%s|",
-               (prefix ? prefix : ""),
-               (unsigned)offset,
-               hexbuf,
-               asciibuf);
+    log_printf(level, file, line, func, "%s%X: %s |%s|", (prefix ? prefix : ""),
+               (unsigned)offset, hexbuf, asciibuf);
 
     offset += chunk;
+  }
+}
+
+/* ============================================================
+ *  PANIC
+ * ============================================================ */
+
+/* 这里的 PANIC 直接复用 log_vprintf，打印一条 [E] ... PANIC(): msg，
+ * 然后在 RISC-V 上 ebreak 并死循环。
+ */
+void log_panicf_internal(const char* file, int line, const char* fmt, ...)
+{
+  va_list ap;
+  va_start(ap, fmt);
+  /* func 填 "PANIC"，方便看前缀 */
+  log_vprintf(LOG_LEVEL_ERROR, file, line, "PANIC", fmt, ap);
+  va_end(ap);
+
+#ifdef __riscv
+  __asm__ volatile("ebreak");
+#endif
+
+  for (;;) {
+    /* 可选：低功耗一点的话可以 wfi */
+    /* __asm__ volatile("wfi"); */
   }
 }

@@ -71,3 +71,6 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+*.dump
+*.i
+*.s

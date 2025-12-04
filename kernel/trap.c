@@ -7,6 +7,7 @@
 #include "thread.h"
 #include "syscall.h"
 #include "log.h"
+#include "panic.h"
 
 extern void trap_entry(void);
 
@@ -14,6 +15,8 @@ extern void trap_entry(void);
 #define KERNEL_STACK_SIZE 4096
 #endif
 static uint8_t kernel_stack[KERNEL_STACK_SIZE];
+
+static void dump_trap(struct trapframe *tf);
 
 void trap_init(void)
 {
@@ -49,31 +52,22 @@ static uintptr_t syscall_handler(struct trapframe *tf)
   const uintptr_t sys_id = tf->a0;
   const uintptr_t sepc   = tf->sepc;
 
-// 注意：一定要在可能 schedule 前更新 sepc
-#define ADVANCE_SEPC()   \
-  do {                   \
-    tf->sepc = sepc + 4; \
-  } while (0)
-
   switch (sys_id) {
     case SYS_SLEEP:
       ADVANCE_SEPC();
       thread_sys_sleep(tf, tf->a1);
       // 这里可能会 schedule，所以一定要在上面先改 sepc
       break;
-
     case SYS_THREAD_EXIT:
       ADVANCE_SEPC();
       thread_sys_exit(tf, (int)tf->a1);
       // 实际不会回到调用点
       break;
-
     case SYS_THREAD_JOIN:
       ADVANCE_SEPC();
       thread_sys_join(tf, (tid_t)tf->a1, tf->a2);
       // 如果 join 阻塞，schedule 会切到别的线程
       break;
-
     case SYS_THREAD_CREATE:
       ADVANCE_SEPC();
       thread_sys_create(tf, (thread_entry_t)tf->a1, (void *)tf->a2,
@@ -95,20 +89,17 @@ static uintptr_t syscall_handler(struct trapframe *tf)
 
     default:
       ADVANCE_SEPC();  // 仍然要跳过 ecall 防止死循环
-      platform_puts("Unknown syscall id=");
-      platform_put_hex64(sys_id);
-      platform_puts("\n");
+      dump_trap(tf);
+      panic("unknown syscall");
       break;
   }
 
-#undef ADVANCE_SEPC
   return tf->sepc;
 }
 
 uintptr_t trap_entry_c(struct trapframe *tf)
 {
   const reg_t scause      = tf->scause;
-  const uintptr_t stval   = tf->stval;
   const uintptr_t sepc    = tf->sepc;
   const uintptr_t sstatus = tf->sstatus;
 
@@ -157,54 +148,91 @@ uintptr_t trap_entry_c(struct trapframe *tf)
     }
   }
 
-  /* ---------- 3. 统一的“未处理 trap”打印 ---------- */
+  dump_trap(tf);
+  panic("unhandled trap");
 
-  platform_puts(">> unhandled trap: ");
-  platform_puts(is_interrupt ? "interrupt" : "exception");
+  // NEVER GOES HERE
+  if (!is_interrupt) {
+    tf->sepc = sepc + 4;
+  }
+  return tf->sepc;
+}
+
+/* ---------- 调试用：打印完整 trap 信息 ---------- */
+static void dump_trap(struct trapframe *tf)
+{
+  reg_t scause      = tf->scause;
+  uintptr_t stval   = tf->stval;
+  uintptr_t sepc    = tf->sepc;
+  uintptr_t sstatus = tf->sstatus;
+
+  int is_interrupt  = scause_is_interrupt(scause);
+  reg_t code        = scause_code(scause);
+
+  /* 当前线程信息 */
+  tid_t tid         = thread_current();
+  const char *name  = thread_name(tid);
+
+  /* 根据 sstatus.SPP 判断上一层是 U 还是 S：0=U, 1=S */
+  char mode_char    = (sstatus & SSTATUS_SPP) ? 'S' : 'U';
+
+  /* 如果是来自 U-mode 的 ECALL，则把 syscall 号打印出来 */
+  int is_syscall    = (!is_interrupt && code == EXC_ENV_CALL_U);
+  uintptr_t sys_id  = 0;
+  if (is_syscall) {
+    sys_id = tf->a0; /* 你在 syscall_handler 里就是用 a0 当 syscall id 的
+                        :contentReference[oaicite:3]{index=3} */
+  }
+
+  platform_puts("\n*** TRAP ***\n");
+
+  /* 线程 + 模式 */
+  platform_puts("  thread=[");
+  platform_put_hex64((uintptr_t)tid);
+  platform_putc(':');
+  platform_puts(name);
+  platform_putc(':');
+  platform_putc(mode_char); /* 'U' or 'S' */
+  platform_puts("]\n");
+
+  /* 类型 + code */
+  platform_puts("  kind=");
+  if (is_interrupt) {
+    platform_puts("interrupt");
+  } else {
+    platform_puts("exception");
+  }
   platform_puts(" code=");
   platform_put_hex64(code);
 
   if (!is_interrupt) {
-    // 一些常见异常的 decode
-    switch (code) {
-      case EXC_ENV_CALL_M:
-        platform_puts(" (ECALL from M-mode)");
-        break;
-      case EXC_ENV_CALL_S:
-        platform_puts(" (ECALL from S-mode)");
-        break;
-      case EXC_ENV_CALL_U:
-        platform_puts(" (ECALL from U-mode)");
-        break;
-      case EXC_ILLEGAL_INSTR:
-        platform_puts(" (Illegal instruction)");
-        break;
-      default:
-        break;  // 可继续扩展
+    if (code == EXC_ILLEGAL_INSTR) {
+      platform_puts(" (Illegal instruction)");
+    } else if (code == EXC_ENV_CALL_M) {
+      platform_puts(" (ECALL from M-mode)");
+    } else if (code == EXC_ENV_CALL_S) {
+      platform_puts(" (ECALL from S-mode)");
+    } else if (code == EXC_ENV_CALL_U) {
+      platform_puts(" (ECALL from U-mode)");
     }
   }
-
-  platform_puts(", scause=");
-  platform_put_hex64(scause);
-  platform_puts(", sepc=");
-  platform_put_hex64(sepc);
-  platform_puts(", stval=");
-  platform_put_hex64(stval);
-  platform_puts(", sstatus=");
-  platform_put_hex64(sstatus);
   platform_puts("\n");
 
-  /* ---------- 4. 对未预料的 trap 的策略 ---------- */
-  // 对 bare-metal 调试阶段，一般还是建议停机或陷入 debugger：
-  for (;;) {
-  }  // 你现在的做法就是这个
-
-  // 如果你想“更友好一点”，可以选择：
-  // - 对异常：尝试跳过当前指令继续跑
-  if (!is_interrupt) {
-    tf->sepc = sepc + 4;
+  /* sepc + syscall 号 */
+  platform_puts("  sepc=");
+  platform_put_hex64(sepc);
+  if (is_syscall) {
+    platform_puts("  syscall_id=");
+    platform_put_hex64(sys_id);
   }
-  // - 对中断：RISC-V 语义本来就要求从 sepc 继续执行，不改 sepc
+  platform_puts("\n");
 
-  return tf->sepc;
+  /* 其他 csr */
+  platform_puts("  scause=");
+  platform_put_hex64(scause);
+  platform_puts(" stval=");
+  platform_put_hex64(stval);
+  platform_puts(" sstatus=");
+  platform_put_hex64(sstatus);
+  platform_puts("\n");
 }

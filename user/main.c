@@ -3,6 +3,20 @@
 #include "syscall.h"
 #include "log.h"
 
+void assert_test(int *ptr, size_t len)
+{
+    ASSERT(ptr != NULL);
+    ASSERTF(len < 128, "len=%u", (unsigned)len);
+
+    unsigned addr = 0;
+    if (addr == 0) {
+        PANICF("flash write failed, addr=0x%08x", (unsigned)addr);
+    }
+
+    BREAK_IF(addr == 0);  // 只打断点，不挂机
+}
+
+
 static void worker_thread(void *arg)
 {
   int n = (int)(uintptr_t)arg;
@@ -32,6 +46,8 @@ void user_main(void *arg)
 
   print_thread_prefix();
   pr_info("system init done.");
+
+  // assert_test(NULL, 0);
 
   /* 创建一个 worker 线程，演示 thread_exit / thread_join */
   tid_t worker_tid =
