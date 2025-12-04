@@ -27,7 +27,7 @@ void main(long hartid, long dtb_pa)
   threads_init();
 
   /* 启动第一次定时器 */
-  platform_timer_start_after(1000000UL);
+  platform_timer_start_after(DELTA_TICKS);
 
   /* exec user main */
   threads_exec(user_main, NULL);

@@ -18,6 +18,9 @@ void arch_first_switch(struct trapframe *tf);
 #error "THREAD_MAX must be at least 2 (for idle + main)"
 #endif
 
+#define USER_THREAD 1
+#define KERN_THREAD 0
+
 /* -------------------------------------------------------------------------- */
 /* Types & globals                                                            */
 /* -------------------------------------------------------------------------- */
@@ -207,6 +210,7 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name)
   t->join_waiter     = -1;
   t->waiting_for     = -1;
   t->join_status_ptr = 0;
+  t->is_user = KERN_THREAD;
 
   init_thread_context_s(t, entry, arg);
 
@@ -227,7 +231,7 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
   t->wakeup_tick = 0;
   t->name        = name ? name : "uthread";
   t->stack_base  = g_thread_stacks[tid];
-  t->is_user     = 1;
+  t->is_user     = USER_THREAD;
 
   init_thread_context_u(t, entry, arg);
 
@@ -442,10 +446,13 @@ void print_thread_prefix(void)
 {
   tid_t tid        = thread_current();
   const char *name = thread_name(tid);
+  char mode = g_threads[tid].is_user ? 'U' : 'S';
 
   platform_putc('[');
   platform_put_hex64((uintptr_t)tid);
   platform_putc(':');
   platform_puts(name);
+  platform_putc(':');
+  platform_putc(mode);
   platform_puts("] ");
 }

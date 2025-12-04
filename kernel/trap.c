@@ -40,7 +40,7 @@ void trap_init(void)
 static void timer_handler(struct trapframe *tf)
 {
   threads_tick();
-  platform_timer_start_after(1000000UL);  // 大约 1s
+  platform_timer_start_after(DELTA_TICKS);  // 大约 1s
   schedule(tf);
 }
 
