@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 void arch_enable_timer_interrupts(void);
-void arch_drop_to_user(void (*entry)(void *), void *arg, uintptr_t user_sp);
+
+struct trapframe;
+void arch_first_switch(struct trapframe *tf);
 
 #endif // ARCH_H

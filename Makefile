@@ -52,7 +52,7 @@ ARCH_SRCS := \
   $(ARCH_DIR)/start.S \
   $(ARCH_DIR)/trap.S \
   $(ARCH_DIR)/arch.c \
-  $(ARCH_DIR)/user.S
+  $(ARCH_DIR)/arch_first_switch.S
 
 
 # 内核层 (目前只有 main，将来会增加 sched.c / thread.c / trap.c / timer.c 等)

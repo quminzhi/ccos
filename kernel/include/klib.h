@@ -5,10 +5,6 @@
 
 #include <stddef.h>  // for size_t; freestanding 环境里这个头是标准的一部分
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #define ASSERT(cond, msg)             \
   do {                                \
     if (!(cond)) {                    \
@@ -35,9 +31,5 @@ void *memcpy(void *dest, const void *src, size_t n);
 int memcmp(const void *s1, const void *s2, size_t n);
 
 size_t strlen(const char *s);
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* KLIB_H */

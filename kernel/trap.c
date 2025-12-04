@@ -37,102 +37,151 @@ void trap_init(void)
   // plic_enable_irq(PLIC_IRQ_platform0);
 }
 
-/*
- * trap_entry_c 由 arch/riscv/trap.S 调用：
- *
- * trap_entry:
- *   保存最小现场 (ra 等)
- *   call trap_entry_c
- *   恢复现场
- *   sret
- */
-uintptr_t trap_entry_c(struct trapframe *tf)
+static void timer_handler(struct trapframe *tf)
 {
-  reg_t scause      = tf->scause;
-  uintptr_t stval   = tf->stval;
-  uintptr_t sepc    = tf->sepc;
-  uintptr_t sstatus = tf->sstatus;
+  threads_tick();
+  platform_timer_start_after(1000000UL);  // 大约 1s
+  schedule(tf);
+}
 
-  int is_interrupt  = scause_is_interrupt(scause);
-  reg_t code        = scause_code(scause);
+static uintptr_t syscall_handler(struct trapframe *tf)
+{
+  const uintptr_t sys_id = tf->a0;
+  const uintptr_t sepc   = tf->sepc;
 
-  /* ---------- 机器定时器中断：tick + 更新睡眠 + 调度 ---------- */
-  if (is_interrupt && code == IRQ_TIMER_S) {
-    /* S-mode timer interrupt */
-    threads_tick();
-    platform_timer_start_after(10000000UL);  // 大约 1s
-    schedule(tf);
-    return tf->sepc;
-  }
+// 注意：一定要在可能 schedule 前更新 sepc
+#define ADVANCE_SEPC()   \
+  do {                   \
+    tf->sepc = sepc + 4; \
+  } while (0)
 
-  /* ---------- ECALL from S-mode：作为简单 syscall 入口 ---------- */
-  if (!is_interrupt && code == EXC_ENV_CALL_U) {
-    uintptr_t sys_id = tf->a0;
-
-    if (sys_id == SYS_SLEEP) {
-      /* sleep(ticks) 的“内核实现”，放在线程模块里 */
-      tf->sepc = sepc + 4;
+  switch (sys_id) {
+    case SYS_SLEEP:
+      ADVANCE_SEPC();
       thread_sys_sleep(tf, tf->a1);
-      // WARNING: tf->sepc = sepc + 4; 此时可能是下一个线程的mepc
-      // 凡是你想写回“当前线程”的 tf 字段（比如 mepc），一定要在调用 schedule
-      // 前改。
-      return tf->sepc;
-    } else if (sys_id == SYS_THREAD_EXIT) {
-      tf->sepc = sepc + 4;
+      // 这里可能会 schedule，所以一定要在上面先改 sepc
+      break;
+
+    case SYS_THREAD_EXIT:
+      ADVANCE_SEPC();
       thread_sys_exit(tf, (int)tf->a1);
-      return tf->sepc;  // 实际不会回到调用 thread_exit 的那一行
-    } else if (sys_id == SYS_THREAD_JOIN) {
-      tf->sepc = sepc + 4;
+      // 实际不会回到调用点
+      break;
+
+    case SYS_THREAD_JOIN:
+      ADVANCE_SEPC();
       thread_sys_join(tf, (tid_t)tf->a1, tf->a2);
-      return tf->sepc;  // 如果 join 阻塞，schedule 会切到别的线程
-    } else if (sys_id == SYS_THREAD_CREATE) {
-      tf->sepc = sepc + 4;
+      // 如果 join 阻塞，schedule 会切到别的线程
+      break;
+
+    case SYS_THREAD_CREATE:
+      ADVANCE_SEPC();
       thread_sys_create(tf, (thread_entry_t)tf->a1, (void *)tf->a2,
                         (const char *)tf->a3);
-      return tf->sepc;
-      // } else if (sys_id == SYS_WRITE) {
-      //   tf->sepc = sepc + 4;
-      //   platform_sys_write(tf, (int)tf->a1, tf->a2, tf->a3);
-      //   return tf->sepc;
-      // } else if (sys_id == SYS_READ) {
-      //   tf->sepc = sepc + 4;
-      //   platform_sys_read(tf, (int)tf->a1, tf->a2, tf->a3);
-      //   return tf->sepc;
-    } else {
+      break;
+
+      // 以后想开 write/read，直接在这加 case 就行
+      /*
+      case SYS_WRITE:
+        ADVANCE_SEPC();
+        platform_sys_write(tf, (int)tf->a1, tf->a2, tf->a3);
+        break;
+
+      case SYS_READ:
+        ADVANCE_SEPC();
+        platform_sys_read(tf, (int)tf->a1, tf->a2, tf->a3);
+        break;
+      */
+
+    default:
+      ADVANCE_SEPC();  // 仍然要跳过 ecall 防止死循环
       platform_puts("Unknown syscall id=");
       platform_put_hex64(sys_id);
       platform_puts("\n");
-      /* sys 未处理，照样跳过 ecall 防止死循环 */
-      tf->sepc = sepc + 4;
-      return tf->sepc;
+      break;
+  }
+
+#undef ADVANCE_SEPC
+  return tf->sepc;
+}
+
+uintptr_t trap_entry_c(struct trapframe *tf)
+{
+  const reg_t scause      = tf->scause;
+  const uintptr_t stval   = tf->stval;
+  const uintptr_t sepc    = tf->sepc;
+  const uintptr_t sstatus = tf->sstatus;
+
+  const int is_interrupt  = scause_is_interrupt(scause);
+  const reg_t code        = scause_code(scause);
+
+  /* ---------- 1. 先处理“预期内”的中断 ---------- */
+  if (is_interrupt) {
+    switch (code) {
+      case IRQ_TIMER_S:
+        /* S-mode timer interrupt */
+        timer_handler(tf);
+        return tf->sepc;
+
+        // 以后有外部中断、软件中断，可以继续在这里加 case
+
+      default:
+        // 先跳到下面的“未处理 trap”打印逻辑
+        break;
+    }
+  } else {
+    /* ---------- 2. 再处理“预期内”的异常（syscall 等） ---------- */
+    switch (code) {
+      case EXC_ENV_CALL_U:
+        syscall_handler(tf);
+        return tf->sepc;
+
+      case EXC_ILLEGAL_INSTR:
+        // 这里先不马上死循环，分情况处理
+        platform_puts("Illegal instruction\n");
+
+#ifdef SSTATUS_SPP
+        // SSTATUS_SPP == 0 表示从 U-mode trap 到 S-mode
+        if ((sstatus & SSTATUS_SPP) == 0) {
+          // 示例：对用户态非法指令，终止当前线程（类似 SIGILL）
+          thread_sys_exit(tf, -1);
+          return tf->sepc;  // thread_sys_exit 内部可能 schedule
+        }
+#endif
+        // 否则是内核态非法指令，跌到下面的“未处理 trap”
+        break;
+
+      default:
+        // 其它异常 (page fault 等) 可以在这里继续加 case
+        break;
     }
   }
 
-  /* ---------- 其他中断 / 异常：先简单打印一波 ---------- */
+  /* ---------- 3. 统一的“未处理 trap”打印 ---------- */
 
-  platform_puts(">> trap: ");
-  if (is_interrupt) {
-    platform_puts("interrupt");
-  } else {
-    platform_puts("exception");
-  }
+  platform_puts(">> unhandled trap: ");
+  platform_puts(is_interrupt ? "interrupt" : "exception");
   platform_puts(" code=");
   platform_put_hex64(code);
 
   if (!is_interrupt) {
-    /* 常见异常的 decode：用 EXC_* 枚举，避免魔法数字 */
-    if (code == EXC_ILLEGAL_INSTR) {
-      platform_puts(" (Illegal instruction)");
-    } else if (code == EXC_ENV_CALL_M) {
-      platform_puts(" (ECALL from M-mode)");
-    } else if (code == EXC_ENV_CALL_S) {
-      platform_puts(" (ECALL from S-mode)");
-    } else if (code == EXC_ENV_CALL_U) {
-      platform_puts(" (ECALL from U-mode)");
+    // 一些常见异常的 decode
+    switch (code) {
+      case EXC_ENV_CALL_M:
+        platform_puts(" (ECALL from M-mode)");
+        break;
+      case EXC_ENV_CALL_S:
+        platform_puts(" (ECALL from S-mode)");
+        break;
+      case EXC_ENV_CALL_U:
+        platform_puts(" (ECALL from U-mode)");
+        break;
+      case EXC_ILLEGAL_INSTR:
+        platform_puts(" (Illegal instruction)");
+        break;
+      default:
+        break;  // 可继续扩展
     }
-    /* 需要的话可以继续补充更多异常 decode */
-  } else {
-    /* 中断的话，这里可以根据 IRQ_* 做一些通用 decode（暂时略） */
   }
 
   platform_puts(", scause=");
@@ -145,13 +194,17 @@ uintptr_t trap_entry_c(struct trapframe *tf)
   platform_put_hex64(sstatus);
   platform_puts("\n");
 
-  for (;;) {}
+  /* ---------- 4. 对未预料的 trap 的策略 ---------- */
+  // 对 bare-metal 调试阶段，一般还是建议停机或陷入 debugger：
+  for (;;) {
+  }  // 你现在的做法就是这个
 
-  /* 对“异常”（同步 trap）默认策略：跳过当前指令 */
+  // 如果你想“更友好一点”，可以选择：
+  // - 对异常：尝试跳过当前指令继续跑
   if (!is_interrupt) {
     tf->sepc = sepc + 4;
   }
-  /* 对“中断”（异步 trap），保持 mepc 不变，按 RISC-V 语义继续执行 */
+  // - 对中断：RISC-V 语义本来就要求从 sepc 继续执行，不改 sepc
 
   return tf->sepc;
 }

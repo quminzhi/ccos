@@ -8,8 +8,7 @@
 #include "platform.h"
 #include "riscv_csr.h"
 
-// arch.S
-void arch_drop_to_user(void (*entry)(void *), void *arg, uintptr_t user_sp);
+void arch_first_switch(struct trapframe *tf);
 
 /* -------------------------------------------------------------------------- */
 /* Configuration check                                                        */
@@ -37,6 +36,7 @@ typedef struct Thread {
   ThreadState state;
   uint64_t wakeup_tick; /* SLEEPING 时的唤醒 tick（绝对时间） */
   const char *name;
+  int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
 
   struct trapframe tf; /* 保存的寄存器上下文 */
 
@@ -72,10 +72,10 @@ static inline Thread *thread_by_tid(tid_t tid)
   return &g_threads[tid];
 }
 
-/* 找空闲 slot（2 开始：0 idle，1 main 保留） */
+/* 找空闲 slot（1 开始：0 idle 保留） */
 static tid_t alloc_thread_slot(void)
 {
-  for (int i = 2; i < THREAD_MAX; ++i) {
+  for (int i = 1; i < THREAD_MAX; ++i) {
     if (g_threads[i].state == THREAD_UNUSED) {
       return i;
     }
@@ -83,17 +83,44 @@ static tid_t alloc_thread_slot(void)
   return -1;
 }
 
-/* 初始化线程上下文（栈 + entry + arg） */
-static void init_thread_context(Thread *t, thread_entry_t entry, void *arg)
+static void init_thread_context_s(Thread *t, thread_entry_t entry, void *arg)
 {
-  tf_clear(&t->tf);
+  struct trapframe *tf = &t->tf;
+
+  tf_clear(tf);
 
   uintptr_t sp = (uintptr_t)(t->stack_base + THREAD_STACK_SIZE);
-  sp &= ~(uintptr_t)0xFUL; /* 16 字节对齐 */
+  sp &= ~(uintptr_t)0xFUL;
 
-  t->tf.sp   = sp;
-  t->tf.sepc = (uintptr_t)entry;
-  t->tf.a0   = (uintptr_t)arg;
+  tf->sp   = sp;
+  tf->sepc = (uintptr_t)entry;
+  tf->a0   = (uintptr_t)arg;
+
+  reg_t s  = csr_read(sstatus);
+  s &= ~(SSTATUS_SPP | SSTATUS_SIE);  // 先清 mode + 中断
+  s |= SSTATUS_SPP;                   // SPP=1 -> sret 到 S 模式
+  s |= SSTATUS_SPIE;                  // sret 之后开 S 模式中断
+  tf->sstatus = s;
+}
+
+static void init_thread_context_u(Thread *t, thread_entry_t entry, void *arg)
+{
+  struct trapframe *tf = &t->tf;
+  tf_clear(tf);
+
+  uintptr_t sp = (uintptr_t)(t->stack_base + THREAD_STACK_SIZE);
+  sp &= ~(uintptr_t)0xFUL;
+
+  tf->sp   = sp;
+  tf->sepc = (uintptr_t)entry;  // user-space PC
+  tf->a0   = (uintptr_t)arg;    // 第一个参数
+
+  reg_t s  = csr_read(sstatus);
+  s &= ~(SSTATUS_SPP | SSTATUS_SIE);
+  // SPP=0 -> sret 到 U 模式
+  // 同时把 SPIE=1，这样 sret 之后 U 模式可以被 S-mode interrupt 打断
+  s |= SSTATUS_SPIE;
+  tf->sstatus = s;
 }
 
 /* idle 线程：简单 busy loop */
@@ -153,19 +180,7 @@ void threads_init(void)
   idle->state      = THREAD_RUNNABLE;
   idle->name       = "idle";
   idle->stack_base = g_thread_stacks[0];
-  init_thread_context(idle, idle_main, NULL);
-
-  reg_t s = csr_read(sstatus);  // 当前在 S 模式
-  s |= SSTATUS_SPP;             // SPP=1 -> sret 后仍在 S
-  s |= SSTATUS_SPIE;            // 允许 sret 后在 S 模式打开中断
-  s &= ~SSTATUS_SIE;  // handler 里先关中断（按你现在 trap_init 的风格）
-  idle->tf.sstatus   = s;
-
-  /* tid 1: main (S-mode) */
-  Thread *main_t     = &g_threads[1];
-  main_t->state      = THREAD_RUNNING;
-  main_t->name       = "main";
-  main_t->stack_base = NULL; /* 使用 boot 栈 */
+  init_thread_context_s(idle, idle_main, NULL);
 }
 
 /* 创建新线程：返回 tid，失败返回 -1 */
@@ -193,32 +208,45 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name)
   t->waiting_for     = -1;
   t->join_status_ptr = 0;
 
-  init_thread_context(t, entry, arg);
+  init_thread_context_s(t, entry, arg);
 
   return tid;
 }
 
-void threads_start(thread_entry_t entry, void *arg)
+static tid_t thread_create_user(thread_entry_t entry, void *arg,
+                                const char *name)
 {
   tid_t tid = alloc_thread_slot();
+
   if (tid < 0) {
-    pr_warn("thread_start: no free slot\n");
+    return -1;
   }
+
+  Thread *t      = &g_threads[tid];
+  t->state       = THREAD_RUNNABLE;
+  t->wakeup_tick = 0;
+  t->name        = name ? name : "uthread";
+  t->stack_base  = g_thread_stacks[tid];
+  t->is_user     = 1;
+
+  init_thread_context_u(t, entry, arg);
+
+  return tid;
+}
+
+// "exec"
+tid_t threads_exec(thread_entry_t user_main, void *arg)
+{
+  tid_t tid = thread_create_user(user_main, arg, "user_main");
+  if (tid < 0) {
+    pr_err("no slot for user_main\n");
+  }
+
+  g_current_tid = tid;
   Thread *t     = &g_threads[tid];
+  arch_first_switch(&t->tf);  // 不会返回
 
-  /* 配 main 线程的基本信息和栈 */
-  t->state      = THREAD_RUNNING;
-  t->name       = "user_main";
-  t->stack_base = g_thread_stacks[tid];
-
-  /* 用已有的 helper 初始化它的 tf（sp / sepc / a0） */
-  init_thread_context(t, entry, arg); /* tf.sp / tf.sepc / tf.a0 已经设置好 */
-
-  /* 调用 arch_drop_to_user：从 S 模式掉到 U 模式，开始执行 entry(arg) */
-  arch_drop_to_user((void (*)(void *))t->tf.sepc, (void *)t->tf.a0, t->tf.sp);
-
-  /* 理论上不会返回；防止编译器抱怨，加个死循环 */
-  while (1) {
+  for (;;) {
     __asm__ volatile("wfi");
   }
 }
@@ -294,8 +322,8 @@ void thread_sys_sleep(struct trapframe *tf, uint64_t ticks)
 void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
                        const char *name)
 {
-  tid_t tid = thread_create_kern(entry, arg, name);
-  tf->a0    = (uintptr_t)tid;
+  tid_t tid = thread_create_user(entry, arg, name);
+  tf->a0    = (uintptr_t)tid;  // 返回 tid 给用户态
 }
 
 /* thread_exit 的内核实现：不会返回 */
@@ -407,4 +435,17 @@ const char *thread_name(tid_t tid)
     return "?";
   }
   return t->name;
+}
+
+
+void print_thread_prefix(void)
+{
+  tid_t tid        = thread_current();
+  const char *name = thread_name(tid);
+
+  platform_putc('[');
+  platform_put_hex64((uintptr_t)tid);
+  platform_putc(':');
+  platform_puts(name);
+  platform_puts("] ");
 }
