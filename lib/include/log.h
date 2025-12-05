@@ -276,7 +276,8 @@ void log_panicf_internal(const char* file, int line, const char* fmt, ...)
  *      BREAK IF / EBREAK
  * ========================= */
 
-/* inline 的 break，头文件里直接用即可。 */
+#ifndef NDEBUG
+
 static inline void log_break(void)
 {
 #ifdef __riscv
@@ -284,13 +285,30 @@ static inline void log_break(void)
 #endif
 }
 
-/* 条件触发 ebreak，方便在某些状态打断点。 */
+/* 条件满足时直接 ebreak，停在调试器里 */
 #define BREAK_IF(cond) \
   do {                 \
     if (cond) {        \
       log_break();     \
     }                  \
   } while (0)
+
+#else /* Release 版：不 ebreak，只打一条 warning */
+
+static inline void log_break(void)
+{
+  /* Release 版本不做任何事情，防止量产环境误触发断点异常 */
+}
+
+/* 条件满足时打一条 warning 日志继续跑 */
+#define BREAK_IF(cond)                                    \
+  do {                                                    \
+    if (cond) {                                           \
+      pr_warn("BREAK_IF hit (release build): %s", #cond); \
+    }                                                     \
+  } while (0)
+
+#endif /* NDEBUG */
 
 #ifdef __cplusplus
 }

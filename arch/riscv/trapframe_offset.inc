@@ -1,5 +1,5 @@
 /* arch/riscv/trap_offsets.inc */
-/* 必须和 C 里的 struct trapframe 一致 */
+/* 必须和 trap.h 里的 struct trapframe 一致 */
 
     .equ     TF_RA,      0
     .equ     TF_SP,      8
@@ -36,4 +36,4 @@
     .equ     TF_SSTATUS, 256
     .equ     TF_SCAUSE,  264
     .equ     TF_STVAL,   272
-    .equ     TF_SIZE,    280    # 根据你 struct trapframe 实际大小调整
+    .equ     TF_SIZE,    288    # with pad

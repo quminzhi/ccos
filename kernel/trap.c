@@ -17,6 +17,7 @@ extern void trap_entry(void);
 static uint8_t kernel_stack[KERNEL_STACK_SIZE];
 
 static void dump_trap(struct trapframe *tf);
+static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid);
 
 void trap_init(void)
 {
@@ -45,6 +46,55 @@ static void timer_handler(struct trapframe *tf)
   threads_tick();
   platform_timer_start_after(DELTA_TICKS);  // 大约 1s
   schedule(tf);
+}
+
+static uintptr_t breakpoint_handler(struct trapframe *tf)
+{
+  const reg_t scause    = tf->scause;
+  const uintptr_t sepc  = tf->sepc;
+  const uintptr_t stval = tf->stval;
+  const reg_t sstatus   = tf->sstatus;
+
+#ifdef SSTATUS_SPP
+  const int from_kernel =
+      (sstatus & SSTATUS_SPP) != 0;  // 1 = S-mode, 0 = U-mode
+#else
+  const int from_kernel = 1;  // 没有 SPP 就当全是内核态
+#endif
+
+#ifndef NDEBUG
+  /* -------- Debug 版本：打印信息，尽量帮你定位 -------- */
+
+  pr_debug("*** BREAKPOINT (ebreak) ***");
+  pr_debug("  from=%s-mode sepc=0x%016lx", from_kernel ? "S" : "U",
+           (unsigned long)sepc);
+  pr_debug("  scause=0x%016lx stval=0x%016lx sstatus=0x%016lx",
+           (unsigned long)scause, (unsigned long)stval, (unsigned long)sstatus);
+  dump_backtrace_from_tf(tf, thread_current());
+
+  if (!from_kernel) {
+    /* 用户态 ebreak：类似 SIGTRAP
+     * 策略：跳过 ebreak，然后把当前线程干掉，避免用户态死循环。
+     */
+    ADVANCE_SEPC();           // tf->sepc = sepc + 4;
+    thread_sys_exit(tf, -1);  // 不一定会返回
+    return tf->sepc;
+  }
+
+  /* 内核态 ebreak：大多数就是你写的 BREAK_IF()
+   * Debug 下默认策略：打印一堆信息，然后跳过 ebreak 继续执行。
+   * 这样你在串口 log 里可以看到 EXACT 哪个 PC 触发了 BREAK_IF。
+   */
+  ADVANCE_SEPC();
+  return tf->sepc;
+
+#else  /* NDEBUG */
+  /* -------- Release 版本：出现在这里就是严重 bug -------- */
+  dump_trap(tf);
+  panic("EXC_BREAKPOINT in release build");
+  // NOT REACHED
+  return tf->sepc;
+#endif /* NDEBUG */
 }
 
 static uintptr_t syscall_handler(struct trapframe *tf)
@@ -97,6 +147,10 @@ static uintptr_t syscall_handler(struct trapframe *tf)
   return tf->sepc;
 }
 
+#ifndef NDEBUG
+extern void print_thread_prefix(void);
+#endif
+
 uintptr_t trap_entry_c(struct trapframe *tf)
 {
   const reg_t scause      = tf->scause;
@@ -105,6 +159,12 @@ uintptr_t trap_entry_c(struct trapframe *tf)
 
   const int is_interrupt  = scause_is_interrupt(scause);
   const reg_t code        = scause_code(scause);
+
+#ifndef NDEBUG
+  unsigned long old_sepc   = tf->sepc;
+  unsigned long old_s0     = tf->s0;
+  unsigned long old_scause = tf->scause;
+#endif
 
   /* ---------- 1. 先处理“预期内”的中断 ---------- */
   if (is_interrupt) {
@@ -126,7 +186,9 @@ uintptr_t trap_entry_c(struct trapframe *tf)
       case EXC_ENV_CALL_U:
         syscall_handler(tf);
         return tf->sepc;
-
+      case EXC_BREAKPOINT: {
+        return breakpoint_handler(tf);
+      }
       case EXC_ILLEGAL_INSTR:
         // 这里先不马上死循环，分情况处理
         platform_puts("Illegal instruction\n");
@@ -148,6 +210,16 @@ uintptr_t trap_entry_c(struct trapframe *tf)
     }
   }
 
+#ifndef NDEBUG
+  pr_debug("trap_entry_c: ENTER sepc=0x%lx s0=0x%lx scause=0x%lx",
+           (unsigned long)old_sepc, (unsigned long)old_s0,
+           (unsigned long)old_scause);
+
+  print_thread_prefix();
+  pr_debug("trap_entry_c: LEAVE sepc=0x%lx s0=0x%lx", (unsigned long)tf->sepc,
+           (unsigned long)tf->s0);
+#endif
+
   dump_trap(tf);
   panic("unhandled trap");
 
@@ -159,6 +231,90 @@ uintptr_t trap_entry_c(struct trapframe *tf)
 }
 
 /* ---------- 调试用：打印完整 trap 信息 ---------- */
+
+static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid)
+{
+  (void)tid; /* 如果暂时不用 tid，避免编译告警 */
+
+  /* RISC-V GCC 在 -fno-omit-frame-pointer 下：
+   *   prologue 典型为：
+   *     addi sp, sp, -16
+   *     sd   ra, 8(sp)
+   *     sd   s0, 0(sp)
+   *     addi s0, sp, 16
+   *
+   * 所以：
+   *   当前帧的 frame pointer = s0
+   *   前一帧的 s0 保存在 [s0 - 16]
+   *   当前帧保存的 ra 在 [s0 -  8]
+   */
+  uintptr_t fp0 = tf->s0;
+
+  if (fp0 == 0) {
+    platform_puts("  backtrace: <no frame pointer>\n");
+    return;
+  }
+
+  /* 以 trap 时的 sp 为中心限定一个窗口，避免乱跑栈：
+   * 这里只是个保守估计，根据你实际的栈大小可以调大/调小。
+   */
+  const uintptr_t approx_sp      = tf->sp;
+  const uintptr_t MAX_STACK_SCAN = 16 * 1024; /* 16 KiB */
+
+  uintptr_t stack_lo             = approx_sp - MAX_STACK_SCAN;
+  uintptr_t stack_hi             = approx_sp + MAX_STACK_SCAN;
+
+  /* 处理一下 underflow 的情况 */
+  if (stack_lo > approx_sp) {
+    stack_lo = 0;
+  }
+
+  platform_puts("  backtrace:\n");
+
+  /* frame #0：trap 发生时的 PC/RA */
+  platform_puts("    #0  pc=");
+  platform_put_hex64((uint64_t)tf->sepc);
+  platform_puts("  ra=");
+  platform_put_hex64((uint64_t)tf->ra);
+  platform_puts("\n");
+
+  uintptr_t fp        = fp0;
+  const int MAX_DEPTH = 16; /* 防止死循环/栈太深 */
+
+  for (int depth = 1; depth < MAX_DEPTH; ++depth) {
+    /* 简单栈范围检查 */
+    if (fp < stack_lo + 2 * sizeof(uintptr_t) || fp > stack_hi) {
+      break;
+    }
+
+    uintptr_t *frame   = (uintptr_t *)fp;
+
+    /* 布局：
+     *   frame[-2] = prev s0 (上一帧的 fp)
+     *   frame[-1] = saved ra
+     */
+    uintptr_t saved_ra = frame[-1];
+    uintptr_t prev_fp  = frame[-2];
+
+    if (saved_ra == 0 || prev_fp == 0) {
+      break;
+    }
+
+    /* 栈向下增长，往上一帧走时 fp 应该单调递增 */
+    if (prev_fp <= fp) {
+      break;
+    }
+
+    platform_puts("    #");
+    platform_put_dec_us((uint64_t)depth);
+    platform_puts("  ra=");
+    platform_put_hex64((uint64_t)saved_ra);
+    platform_puts("\n");
+
+    fp = prev_fp;
+  }
+}
+
 static void dump_trap(struct trapframe *tf)
 {
   reg_t scause      = tf->scause;
@@ -180,8 +336,7 @@ static void dump_trap(struct trapframe *tf)
   int is_syscall    = (!is_interrupt && code == EXC_ENV_CALL_U);
   uintptr_t sys_id  = 0;
   if (is_syscall) {
-    sys_id = tf->a0; /* 你在 syscall_handler 里就是用 a0 当 syscall id 的
-                        :contentReference[oaicite:3]{index=3} */
+    sys_id = tf->a0;
   }
 
   platform_puts("\n*** TRAP ***\n");
@@ -235,4 +390,8 @@ static void dump_trap(struct trapframe *tf)
   platform_puts(" sstatus=");
   platform_put_hex64(sstatus);
   platform_puts("\n");
+
+#ifndef NDEBUG
+  dump_backtrace_from_tf(tf, tid);
+#endif /* NDEBUG */
 }

@@ -474,12 +474,16 @@ void log_panicf_internal(const char* file, int line, const char* fmt, ...)
   log_vprintf(LOG_LEVEL_ERROR, file, line, "PANIC", fmt, ap);
   va_end(ap);
 
+#ifndef NDEBUG
+  /* Debug 版：触发 ebreak，方便调试器直接停在 panic 现场 */
 #ifdef __riscv
   __asm__ volatile("ebreak");
 #endif
+#endif
 
+  /* Debug/Release 都会挂死在这里（你可以改成 reset 等） */
   for (;;) {
-    /* 可选：低功耗一点的话可以 wfi */
+    /* 可选：低功耗一点可以 wfi */
     /* __asm__ volatile("wfi"); */
   }
 }

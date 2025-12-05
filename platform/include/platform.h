@@ -19,6 +19,8 @@ void platform_putc(char c);
 void platform_puts(const char *s);
 void platform_write(const char *buf, size_t len);
 void platform_put_hex64(uint64_t x);
+void platform_put_dec_s(int64_t v);
+void platform_put_dec_us(uint64_t x);
 
 /* 让 CPU idle，一般就是 wfi */
 void platform_idle(void);

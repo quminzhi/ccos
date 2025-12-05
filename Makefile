@@ -10,6 +10,10 @@
 #    linker/                - 链接脚本
 # ============================================================================
 
+# Debug / Release 模式
+# make RELEASE=YES 切到 Release
+RELEASE ?= NO
+
 # ---------------------------------------------------------------------------
 # 工具链配置
 # ---------------------------------------------------------------------------
@@ -45,8 +49,8 @@ TARGET_NAME  := kernel
 TARGET       := $(OUT_DIR)/$(TARGET_NAME).elf
 MAP_FILE     := $(OUT_DIR)/$(TARGET_NAME).map
 # 整个程序的总汇编和符号表
-TARGET_DISASM := $(BUILD_DIR)/$(TARGET_NAME).disasm
-TARGET_SYMS   := $(BUILD_DIR)/$(TARGET_NAME).sym
+TARGET_DISASM := $(OUT_DIR)/$(TARGET_NAME).disasm
+TARGET_SYMS   := $(OUT_DIR)/$(TARGET_NAME).sym
 
 # ---------------------------------------------------------------------------
 # 源文件组织
@@ -90,32 +94,64 @@ INCLUDE_DIRS := \
 # 编译 / 链接选项
 # ---------------------------------------------------------------------------
 
+RISCV_ARCH ?= rv64ima_zicsr
+RISCV_ABI  ?= lp64
+# QEMU virt 上用 SiFive 7 系列的 tune 很合适
+RISCV_TUNE ?= sifive-7-series
+
+# ========================
+# 通用 CFLAGS
+# ========================
 CFLAGS := \
-  -march=rv64ima_zicsr -mabi=lp64 \
-  -nostdlib -nostartfiles -ffreestanding -fno-builtin \
+  -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) -mtune=$(RISCV_TUNE) \
+  -ffreestanding -fno-builtin \
   -Wall -Wextra \
   -mcmodel=medany \
+  -ffunction-sections -fdata-sections \
   $(INCLUDE_DIRS)
 
+# 强制包含配置头
 CFLAGS += -include kernel_config.h
 
 # 自动依赖
-CFLAGS += -MMD -MP
+CFLAGS  += -MMD -MP
 ASFLAGS += -MMD -MP
 
-# 调试相关
-CFLAGS += -g3 -Og -fno-omit-frame-pointer
-CFLAGS += -fno-inline
-CFLAGS += -fno-optimize-sibling-calls
+# 如果你的 .S 也是用 gcc 编译，可以把 -march/-mabi/-mtune 合到 ASFLAGS 里：
+# ASFLAGS += -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) -mtune=$(RISCV_TUNE)
 
+# ========================
+# Debug / Release 特定 CFLAGS
+# ========================
+ifeq ($(RELEASE),YES)
+  # ---- Release：偏性能，兼顾体积 ----
+  CFLAGS += -O2 -DNDEBUG -flto
+  # 如果后面发现体积比性能更重要，可以改成：
+  # CFLAGS += -Os -DNDEBUG -flto
+else
+  # ---- Debug：调试友好 ----
+  CFLAGS += -g3 -Og -fno-omit-frame-pointer
+  CFLAGS += -fno-inline
+  CFLAGS += -fno-optimize-sibling-calls
+endif
+
+# ========================
+# 链接脚本 / LDFLAGS
+# ========================
 # 链接脚本命名规则：linker/<arch>-<board>.ld
 LINKER_SCRIPT := linker/$(ARCH)-$(BOARD).ld
 
 LDFLAGS := \
+  -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) -mtune=$(RISCV_TUNE) \
   -nostdlib -nostartfiles -ffreestanding \
   -Wl,-T,$(LINKER_SCRIPT) \
   -Wl,--gc-sections \
-	-Wl,-Map,$(MAP_FILE)
+  -Wl,-Map,$(MAP_FILE)
+
+# LTO 在链接阶段也要打开
+ifeq ($(RELEASE),YES)
+  LDFLAGS += -flto
+endif
 
 # ---------------------------------------------------------------------------
 # QEMU 运行配置
@@ -130,9 +166,11 @@ QEMU_GDB_PORT ?= 1234
 # 规则
 # ---------------------------------------------------------------------------
 
-.PHONY: all clean run debug-sources disasm-all objdump-objs symbols size
+.PHONY: all build clean run debug-sources disasm-all objdump-objs symbols size
 
-all: $(TARGET) disasm-all symbols objdump-objs size
+all: build
+
+build: $(TARGET) disasm-all symbols objdump-objs size
 
 # 链接规则：注意先保证目录存在
 $(TARGET): $(OBJS)
@@ -201,7 +239,7 @@ $(DUMP_DIR)/%.objdump: $(OBJ_DIR)/%.o
 # ---------------------------------------------------------------------------
 
 # 启动 QEMU + OpenSBI，在 S 模式运行内核
-qemu: $(TARGET)
+qemu: $(TARGET) 
 	@echo "  QEMU  $(TARGET)"
 	$(QEMU) $(QEMU_OPTS) -kernel $(TARGET)
 

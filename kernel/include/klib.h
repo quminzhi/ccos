@@ -5,16 +5,6 @@
 
 #include <stddef.h>  // for size_t; freestanding 环境里这个头是标准的一部分
 
-#define ASSERT(cond, msg)             \
-  do {                                \
-    if (!(cond)) {                    \
-      uart_puts("ASSERT FAIL: " msg); \
-      while (1) {                     \
-        __asm__ volatile("ebreak");   \
-      }                               \
-    }                                 \
-  } while (0)
-
 // Set the first n bytes of the block of memory pointed by s
 // to the specified value (interpreted as unsigned char).
 void *memset(void *s, int c, size_t n);
