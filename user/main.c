@@ -1,5 +1,4 @@
 #include "thread.h"
-#include "platform.h"
 #include "syscall.h"
 #include "log.h"
 #include "ulib.h"
