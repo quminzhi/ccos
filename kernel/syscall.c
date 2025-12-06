@@ -76,3 +76,22 @@ tid_t thread_create(thread_entry_t entry, void *arg, const char *name)
 
   return (tid_t)a0;  // 返回 tid（<0 表示失败）
 }
+
+int thread_list(struct u_thread_info *buf, int max)
+{
+  register uintptr_t a0 asm("a0") = SYS_THREAD_LIST;
+  register uintptr_t a1 asm("a1") = (uintptr_t)buf;
+  register uintptr_t a2 asm("a2") = (uintptr_t)max;
+
+  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
+  return (int)a0;
+}
+
+int thread_kill(tid_t tid)
+{
+  register uintptr_t a0 asm("a0") = SYS_THREAD_KILL;
+  register uintptr_t a1 asm("a1") = (uintptr_t)tid;
+
+  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : : "memory");
+  return (int)a0;
+}

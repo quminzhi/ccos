@@ -2,6 +2,7 @@
 #include <stddef.h>
 
 #include "thread.h"
+#include "thread_sys.h"
 #include "trap.h"
 #include "log.h"
 #include "platform.h"
@@ -25,16 +26,6 @@ void arch_first_switch(struct trapframe *tf);
 /* -------------------------------------------------------------------------- */
 /* Types & globals                                                            */
 /* -------------------------------------------------------------------------- */
-
-typedef enum {
-  THREAD_UNUSED   = 0,
-  THREAD_RUNNABLE = 1,
-  THREAD_RUNNING  = 2,
-  THREAD_SLEEPING = 3,
-  THREAD_WAITING  = 4, /* thread_join 中，等待其它线程 */
-  THREAD_ZOMBIE   = 5, /* 已退出，等待 join 回收     */
-  THREAD_BLOCKED  = 6, /* 通用阻塞：比如等 stdin 数据 */
-} ThreadState;
 
 typedef struct Thread {
   tid_t id;
@@ -458,6 +449,96 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
    *    然后把 joiner 的 state 变成 RUNNABLE。
    */
   schedule(tf);
+}
+
+int thread_sys_list(struct u_thread_info *ubuf, int max)
+{
+  if (!ubuf || max <= 0) {
+    return -1;  // EINVAL
+  }
+  int count = 0;
+  for (int i = 0; i < THREAD_MAX && count < max; ++i) {
+    Thread *t = &g_threads[i];
+    if (t->state == THREAD_UNUSED) {
+      continue;
+    }
+    struct u_thread_info *dst = &ubuf[count];
+    dst->tid                  = t->id;
+    dst->state                = (int)t->state;
+    dst->is_user              = t->is_user ? 1 : 0;
+    dst->exit_code            = t->exit_code;
+
+    int j                     = 0;
+    if (t->name) {
+      while (t->name[j] && j < (int)sizeof(dst->name) - 1) {
+        dst->name[j] = t->name[j];
+        ++j;
+      }
+    }
+    dst->name[j] = '\0';
+    ++count;
+  }
+  return count;
+}
+
+void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
+{
+  /* 基本检查 */
+  if (target_tid < 0 || target_tid >= THREAD_MAX) {
+    tf->a0 = -1;  // EINVAL
+    return;
+  }
+
+  if (target_tid == 0) {
+    tf->a0 = -2;  // 不允许杀 idle
+    return;
+  }
+
+  /* 杀自己：直接走正常 exit 流程（不会返回） */
+  if (target_tid == g_current_tid) {
+    thread_sys_exit(tf, THREAD_EXITCODE_SIGKILL);
+    __builtin_unreachable();
+  }
+
+  Thread *t = &g_threads[target_tid];
+
+  if (t->state == THREAD_UNUSED) {
+    tf->a0 = -3;  // ESRCH: 不存在
+    return;
+  }
+
+  /* 已经 ZOMBIE 了就当成功 */
+  if (t->state == THREAD_ZOMBIE) {
+    tf->a0 = 0;
+    return;
+  }
+
+  /* 强制标记为 ZOMBIE（SIGKILL 风格） */
+  t->exit_code = THREAD_EXITCODE_SIGKILL;
+  t->state     = THREAD_ZOMBIE;
+
+  /* 如果有人在 join 它，按正常 exit 的逻辑处理一下 joiner */
+  if (t->join_waiter >= 0 && t->join_waiter < THREAD_MAX) {
+    Thread *w = &g_threads[t->join_waiter];
+
+    if (w->join_status_ptr != 0) {
+      int *p = (int *)w->join_status_ptr;
+      *p     = t->exit_code;
+    }
+
+    w->tf.a0           = 0;  // join 返回 0 = 成功
+    w->waiting_for     = -1;
+    w->join_status_ptr = 0;
+
+    if (w->state == THREAD_WAITING) {
+      w->state = THREAD_RUNNABLE;  // 唤醒 joiner
+    }
+  }
+
+  t->join_waiter = -1;
+
+  /* 槽的回收仍然由 join() 负责 */
+  tf->a0         = 0;
 }
 
 /* -------------------------------------------------------------------------- */

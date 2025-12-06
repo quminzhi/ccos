@@ -1,7 +1,7 @@
 #include "shell.h"
 #include "ulib.h"
 #include "syscall.h"
-#include "thread.h"
+#include "thread_sys.h"
 
 /* -------------------------------------------------------------------------- */
 /* 配置                                                                       */
@@ -74,6 +74,26 @@ static int shell_parse_line(char *line, char **argv, int max_args)
 /* 命令表定义                                                                 */
 /* -------------------------------------------------------------------------- */
 
+static const char *thread_state_name(int s)
+{
+  switch (s) {
+    case THREAD_UNUSED:
+      return "UNUSED";
+    case THREAD_RUNNABLE:
+      return "RUNNABLE";
+    case THREAD_RUNNING:
+      return "RUNNING";
+    case THREAD_SLEEPING:
+      return "SLEEP";
+    case THREAD_WAITING:
+      return "WAIT";
+    case THREAD_ZOMBIE:
+      return "ZOMBIE";
+    default:
+      return "?";
+  }
+}
+
 typedef void (*shell_cmd_fn)(int argc, char **argv);
 
 typedef struct {
@@ -87,12 +107,18 @@ static void cmd_help(int argc, char **argv);
 static void cmd_echo(int argc, char **argv);
 static void cmd_exit(int argc, char **argv);
 static void cmd_sleep(int argc, char **argv);
+static void cmd_ps(int argc, char **argv);
+static void cmd_jobs(int argc, char **argv);
+static void cmd_kill(int argc, char **argv);
 
 /* 命令表 */
 static const shell_cmd_t g_shell_cmds[] = {
     {"help",  cmd_help,  "show this help"              },
     {"echo",  cmd_echo,  "echo arguments"              },
     {"sleep", cmd_sleep, "sleep <ticks> (thread sleep)"},
+    {"ps",    cmd_ps,    "list threads"                },
+    {"jobs",  cmd_jobs,  "list user threads"           },
+    {"kill",  cmd_kill,  "kill <tid>"                  },
     {"exit",  cmd_exit,  "exit shell"                  },
 };
 
@@ -162,6 +188,78 @@ static void cmd_exit(int argc, char **argv)
 
   u_puts("shell exiting...");
   thread_exit(0); /* 不会返回 */
+}
+
+static void cmd_ps(int argc, char **argv)
+{
+  (void)argc;
+  (void)argv;
+
+  struct u_thread_info infos[THREAD_MAX];
+  int n = thread_list(infos, THREAD_MAX);
+  if (n < 0) {
+    u_printf("ps: thread_list failed, rc=%d\n", n);
+    return;
+  }
+
+  u_printf(" TID  STATE     MODE  EXIT   NAME\n");
+  u_printf(" ---- --------- ----  ----- ------------\n");
+
+  for (int i = 0; i < n; ++i) {
+    const struct u_thread_info *ti = &infos[i];
+    const char *st                 = thread_state_name(ti->state);
+    char mode                      = ti->is_user ? 'U' : 'S';
+
+    u_printf(" %-4d %-9s  %c   %5d %s\n", ti->tid, st, mode, ti->exit_code,
+             ti->name);
+  }
+}
+
+static void cmd_jobs(int argc, char **argv)
+{
+  (void)argc;
+  (void)argv;
+
+  struct u_thread_info infos[THREAD_MAX];
+  int n = thread_list(infos, THREAD_MAX);
+  if (n < 0) {
+    u_printf("jobs: sys_thread_list failed, rc=%d\n", n);
+    return;
+  }
+
+  u_printf(" TID  STATE     NAME\n");
+  u_printf(" ---- --------- ------------\n");
+
+  for (int i = 0; i < n; ++i) {
+    const struct u_thread_info *ti = &infos[i];
+    if (!ti->is_user) {
+      continue;  // 只关心 U 模式线程
+    }
+    // 你也可以在这里再过滤掉 shell 自己 / user_main 等
+    u_printf(" %-4d %-9s %s\n", ti->tid, thread_state_name(ti->state),
+             ti->name);
+  }
+}
+
+static void cmd_kill(int argc, char **argv)
+{
+  if (argc < 2) {
+    u_puts("usage: kill <tid>");
+    return;
+  }
+
+  int tid = shell_atoi(argv[1]);
+  if (tid <= 0) {
+    u_puts("kill: invalid tid");
+    return;
+  }
+
+  int rc = thread_kill((tid_t)tid);
+  if (rc < 0) {
+    u_printf("kill: failed to kill tid=%d, rc=%d\n", tid, rc);
+  } else {
+    u_printf("kill: sent kill to tid=%d\n", tid);
+  }
 }
 
 /* -------------------------------------------------------------------------- */

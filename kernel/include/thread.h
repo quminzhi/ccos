@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "trap.h"
+#include "thread_sys.h"
 
 /* -------------------------------------------------------------------------- */
 /* Config                                                                     */
@@ -20,13 +21,6 @@
 #endif
 
 #define DELTA_TICKS 10000000UL /* ~1s */
-
-/* -------------------------------------------------------------------------- */
-/* Public types                                                               */
-/* -------------------------------------------------------------------------- */
-
-typedef int tid_t; /* 线程 ID = g_threads[] 的 index      */
-typedef void (*thread_entry_t)(void *arg) __attribute__((noreturn));
 
 /* -------------------------------------------------------------------------- */
 /* Core thread API                                                            */
@@ -82,6 +76,8 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
 
 void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
                        const char *name);
+int thread_sys_list(struct u_thread_info *ubuf, int max);
+void thread_sys_kill(struct trapframe *tf, tid_t target_tid);
 
 /* -------------------------------------------------------------------------- */
 /* Introspection / utils                                                      */

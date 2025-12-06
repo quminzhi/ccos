@@ -125,6 +125,21 @@ static uintptr_t syscall_handler(struct trapframe *tf)
       thread_sys_create(tf, (thread_entry_t)tf->a1, (void *)tf->a2,
                         (const char *)tf->a3);
       break;
+    case SYS_THREAD_KILL: {
+      ADVANCE_SEPC();
+      tid_t tid = (tid_t)tf->a1;
+      thread_sys_kill(tf, tid);
+      /* 返回值已经在 thread_sys_kill 里写入 tf->a0 了 */
+      break;
+    }
+    case SYS_THREAD_LIST: {
+      ADVANCE_SEPC();
+      struct u_thread_info *ubuf = (struct u_thread_info *)tf->a1;
+      int max                    = (int)tf->a2;
+      int n                      = thread_sys_list(ubuf, max);
+      tf->a0                     = (reg_t)n;
+      break;
+    }
     case SYS_WRITE:
       ADVANCE_SEPC();
       nwrite = sys_write((int)tf->a1, (const char *)tf->a2, (uint64_t)tf->a3);

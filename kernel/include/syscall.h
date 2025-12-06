@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "thread.h"
+#include "thread_sys.h"
 
 #define FD_STDIN  0
 #define FD_STDOUT 1
@@ -16,6 +16,8 @@ enum {
   SYS_THREAD_CREATE = 4,
   SYS_WRITE         = 5,
   SYS_READ          = 6,
+  SYS_THREAD_LIST   = 7,
+  SYS_THREAD_KILL   = 8
 };
 
 uint64_t write(int fd, const void *buf, uint64_t len);
@@ -31,5 +33,8 @@ void sleep(uint64_t ticks);
 int thread_join(tid_t tid, int *status_out);
 tid_t thread_create(thread_entry_t entry, void *arg, const char *name);
 void thread_exit(int exit_code) __attribute__((noreturn));
+
+int thread_list(struct u_thread_info *buf, int max);  // 返回实际个数 / 负错误码
+int thread_kill(tid_t tid);                           // 0=OK, <0=错误
 
 #endif  // SYSCALL_H
