@@ -20,6 +20,7 @@ enum {
 
 uint64_t write(int fd, const void *buf, uint64_t len);
 uint64_t read(int fd, void *buf, uint64_t len);
+void sleep(uint64_t ticks);
 
 /* 等待 tid 结束。
  *  - status_out != NULL 时，把目标线程的 exit_code 写进去。
@@ -30,6 +31,5 @@ uint64_t read(int fd, void *buf, uint64_t len);
 int thread_join(tid_t tid, int *status_out);
 tid_t thread_create(thread_entry_t entry, void *arg, const char *name);
 void thread_exit(int exit_code) __attribute__((noreturn));
-void thread_sleep(uint64_t ticks);
 
 #endif  // SYSCALL_H

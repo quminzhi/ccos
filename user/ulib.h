@@ -35,6 +35,9 @@ int u_putchar(int c);                // 输出单个字符到 stdout
 int u_puts(const char *s);           // 输出字符串 + '\n'
 int u_printf(const char *fmt, ...);  // 最小 printf: %s %d %u %x %p %c %%
 int u_snprintf(char *buf, size_t sz, const char *fmt, ...);
+
+// - u_gets 定义为“终端交互用的行读取”，只在 shell/console 用
+// - u_read_line 保留给将来做网络 / 管道 / 文件行读取时用
 int u_read_line(int fd, char *buf, int buf_size);
 int u_getchar(void);                         // 从 stdin 读一个字符
 int u_gets(char *buf, int buf_size);         // 从 stdin 读一行，去掉行尾 \r\n

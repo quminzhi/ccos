@@ -62,82 +62,172 @@ static char *u_itoa(long long value, char *buf_end, int base, int sign)
   return p;
 }
 
+/* 内部：输出一个字符到 buf（带截断计算） */
+static inline void out_char(char *buf, size_t *pos, size_t *total, size_t avail,
+                            char ch)
+{
+  if (*pos < avail) {
+    buf[*pos] = ch;
+  }
+  (*pos)++;
+  (*total)++;
+}
+
 static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 {
-  size_t total = 0;  // 实际“应该输出”的字符数（不含结尾 '\0'）
-  size_t pos   = 0;  // 当前写入位置索引（0..total）
-  size_t avail = 0;  // 可真正写入的最大字符数（预留 1 个字节给 '\0'）
+  size_t total = 0;  // 理论输出长度（不含 '\0'）
+  size_t pos   = 0;  // 实际写入位置
+  size_t avail = 0;  // 最多可写字符数（预留 1 字节给 '\0'）
 
   if (size > 0) {
-    avail = size - 1;  // 最多写 size-1 个可见字符
+    avail = size - 1;
   }
 
   for (; *fmt; ++fmt) {
     if (*fmt != '%') {
-      if (pos < avail) {
-        buf[pos] = *fmt;
-      }
-      ++pos;
-      ++total;
+      out_char(buf, &pos, &total, avail, *fmt);
       continue;
     }
 
+    /* 解析 %[flags][width][.precision][length]specifier */
     ++fmt;
-    if (*fmt == '\0') {
-      break;
-    }
+    if (*fmt == '\0') break;
 
     if (*fmt == '%') {
-      if (pos < avail) {
-        buf[pos] = '%';
-      }
-      ++pos;
-      ++total;
+      out_char(buf, &pos, &total, avail, '%');
       continue;
     }
 
+    /* -------- flags -------- */
+    int left_adjust = 0;  // '-'
+    int zero_pad    = 0;  // '0'
+
+    for (;;) {
+      if (*fmt == '-') {
+        left_adjust = 1;
+        ++fmt;
+      } else if (*fmt == '0') {
+        zero_pad = 1;
+        ++fmt;
+      } else {
+        break;
+      }
+    }
+
+    /* -------- width -------- */
+    int width = 0;
+    while (*fmt >= '0' && *fmt <= '9') {
+      width = width * 10 + (*fmt - '0');
+      ++fmt;
+    }
+
+    /* -------- precision (忽略，只是跳过) -------- */
+    if (*fmt == '.') {
+      ++fmt;
+      while (*fmt >= '0' && *fmt <= '9') {
+        ++fmt;
+      }
+    }
+
+    /* -------- length 修饰符：l / ll / z -------- */
+    enum { LEN_NONE = 0, LEN_L, LEN_LL, LEN_Z } length_mod = LEN_NONE;
+
+    if (*fmt == 'l') {
+      ++fmt;
+      if (*fmt == 'l') {
+        length_mod = LEN_LL;
+        ++fmt;
+      } else {
+        length_mod = LEN_L;
+      }
+    } else if (*fmt == 'z') {
+      length_mod = LEN_Z;
+      ++fmt;
+    }
+
+    if (*fmt == '\0') break;
+
+    char spec = *fmt;
+
+    /* -------- 把值格式化到 tmp[] -------- */
     char tmp[64];
     char *str  = tmp;
     size_t len = 0;
 
-    switch (*fmt) {
+    switch (spec) {
       case 'c': {
         int c  = va_arg(ap, int);
         tmp[0] = (char)c;
-        len    = 1;
         str    = tmp;
+        len    = 1;
         break;
       }
+
       case 's': {
         const char *s = va_arg(ap, const char *);
         if (!s) s = "(null)";
-        str = (char *)s;
-        len = u_strlen(s);
+        str      = (char *)s;
+        len      = u_strlen(s);
+        zero_pad = 0;  // 字符串不做 0 填充
         break;
       }
+
       case 'd':
       case 'i': {
-        int v       = va_arg(ap, int);
-        char *start = u_itoa((long long)v, tmp + sizeof(tmp), 10, 1);
+        long long v = 0;
+        switch (length_mod) {
+          case LEN_NONE:
+            v = (long long)va_arg(ap, int);
+            break;
+          case LEN_L:
+            v = (long long)va_arg(ap, long);
+            break;
+          case LEN_LL:
+            v = (long long)va_arg(ap, long long);
+            break;
+          case LEN_Z:
+            v = (long long)va_arg(ap, long);
+            break;  // 简单处理
+        }
+        char *start = u_itoa(v, tmp + sizeof(tmp), 10, 1);
         str         = start;
         len         = (size_t)((tmp + sizeof(tmp)) - start);
         break;
       }
-      case 'u': {
-        unsigned int v = va_arg(ap, unsigned int);
-        char *start    = u_itoa((long long)v, tmp + sizeof(tmp), 10, 0);
-        str            = start;
-        len            = (size_t)((tmp + sizeof(tmp)) - start);
-        break;
-      }
+
+      case 'u':
       case 'x':
       case 'X': {
-        unsigned int v = va_arg(ap, unsigned int);
-        char *start    = u_itoa((long long)v, tmp + sizeof(tmp), 16, 0);
-        str            = start;
-        len            = (size_t)((tmp + sizeof(tmp)) - start);
+        unsigned long long v = 0;
+        switch (length_mod) {
+          case LEN_NONE:
+            v = (unsigned long long)va_arg(ap, unsigned int);
+            break;
+          case LEN_L:
+            v = (unsigned long long)va_arg(ap, unsigned long);
+            break;
+          case LEN_LL:
+            v = (unsigned long long)va_arg(ap, unsigned long long);
+            break;
+          case LEN_Z:
+            v = (unsigned long long)va_arg(ap, size_t);
+            break;
+        }
+        int base    = (spec == 'u') ? 10 : 16;
+        char *start = u_itoa((long long)v, tmp + sizeof(tmp), base, 0);
+        str         = start;
+        len         = (size_t)((tmp + sizeof(tmp)) - start);
+
+        if (spec == 'X') {
+          for (size_t i = 0; i < len; ++i) {
+            if (str[i] >= 'a' && str[i] <= 'f') {
+              str[i] -= ('a' - 'A');
+            }
+          }
+        }
         break;
       }
+
       case 'p': {
         uintptr_t v = (uintptr_t)va_arg(ap, void *);
         char *start = u_itoa((long long)v, tmp + sizeof(tmp), 16, 0);
@@ -145,30 +235,52 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
         *--start    = '0';
         str         = start;
         len         = (size_t)((tmp + sizeof(tmp)) - start);
+        zero_pad    = 0;
         break;
       }
-      default:
-        // 不支持的格式，输出 "%?"
-        if (pos < avail) buf[pos] = '%';
-        ++pos;
-        ++total;
 
-        if (pos < avail) buf[pos] = *fmt;
-        ++pos;
-        ++total;
+      default: {
+        /* 不支持的格式，输出 "%X" */
+        out_char(buf, &pos, &total, avail, '%');
+        out_char(buf, &pos, &total, avail, spec);
         continue;
+      }
     }
 
-    for (size_t i = 0; i < len; ++i) {
-      if (pos < avail) {
-        buf[pos] = str[i];
+    /* -------- 应用宽度/对齐/填充 -------- */
+    size_t field_len = len;
+    size_t pad_len   = 0;
+    char pad_char    = ' ';
+
+    if (width > 0 && (size_t)width > field_len) {
+      pad_len = (size_t)width - field_len;
+    }
+
+    if (zero_pad && !left_adjust && spec != 's') {
+      pad_char = '0';
+    }
+
+    /* 右对齐：pad 在前 */
+    if (!left_adjust) {
+      for (size_t i = 0; i < pad_len; ++i) {
+        out_char(buf, &pos, &total, avail, pad_char);
       }
-      ++pos;
-      ++total;
+    }
+
+    /* 输出实际内容 */
+    for (size_t i = 0; i < len; ++i) {
+      out_char(buf, &pos, &total, avail, str[i]);
+    }
+
+    /* 左对齐：pad 在后 */
+    if (left_adjust) {
+      for (size_t i = 0; i < pad_len; ++i) {
+        out_char(buf, &pos, &total, avail, ' ');
+      }
     }
   }
 
-  // 确保以 '\0' 结束（如果 size > 0）
+  /* 结尾 '\0' */
   if (size > 0) {
     size_t term = (pos <= avail) ? pos : avail;
     buf[term]   = '\0';
@@ -260,18 +372,69 @@ int u_getchar(void)
   }
 }
 
-/*
- * 从 stdin 读一行：
- *   - 一次 read 1 字节，一直读到 '\n' 或 '\r'（行尾不写入 buf）
- *   - buf 永远是以 '\0' 结尾的字符串，例如 "exit"、"hello"
- * 返回值：
- *   >0 : 实际写入的字符数（不含行尾，不含 '\0'）
- *   =0 : EOF（目前基本不会用到）
- *   <0 : 错误（将来有错误码可以透传）
- */
 int u_gets(char *buf, int buf_size)
 {
-  return u_read_line(FD_STDIN, buf, buf_size);
+  if (buf_size <= 1) {
+    return -1;
+  }
+
+  int used = 0;
+
+  for (;;) {
+    char c;
+    int n = read(FD_STDIN, &c, 1);
+    if (n < 0) {
+      // 将来有错误码可以直接 return n
+      return n;
+    }
+    if (n == 0) {
+      // EOF：如果啥都没读到，就返回 0
+      if (used == 0) {
+        return 0;
+      }
+      break;
+    }
+
+    /* 处理行结束：回车 / 换行 */
+    if (c == '\n' || c == '\r') {
+      // 回显换行（尽量友好一点）
+      u_putchar('\n');
+      break;
+    }
+
+    /* 处理退格：支持 '\b' (0x08) 和 DEL (0x7f) */
+    if (c == '\b' || (unsigned char)c == 0x7f) {
+      if (used > 0) {
+        used--;
+        // 在终端上擦掉一个字符：光标左移、写空格、再左移
+        u_putchar('\b');
+        u_putchar(' ');
+        u_putchar('\b');
+      } else {
+        // 行为空时收到退格：可以选择忽略，或者输出 '\a' 嘟一声
+        // u_putchar('\a');
+      }
+      continue;
+    }
+
+    /* 其它控制字符直接忽略（你也可以自己扩展） */
+    if ((unsigned char)c < 0x20) {
+      continue;
+    }
+
+    /* 正常可见字符：加入缓冲区 + 回显 */
+    if (used < buf_size - 1) {
+      buf[used++] = c;
+      u_putchar(c);
+    } else {
+      // 缓冲区满了：可以忽略后续字符，也可以提示一下
+      // 简单起见：丢弃输入
+      // u_putchar('\a');  // 提示一下也行
+    }
+  }
+
+  buf[used] = '\0';
+  return used;
 }
 
 int u_readn(int fd, void *buf, int nbytes)

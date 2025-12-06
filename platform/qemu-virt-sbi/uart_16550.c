@@ -81,18 +81,11 @@ void uart16550_put_hex64(uint64_t x)
   }
 }
 
-static void write_back(uint8_t ch)
-{
-  uart16550_putc(ch);
-  if (ch == '\r') uart16550_putc('\n');
-}
-
 void uart16550_irq(void)
 {
   // 简单版：把所有收到的字节丢给一个 console 输入处理函数
   while (uart_lsr_read() & UART_LSR_DR) {
     uint8_t ch = uart_rbr_read();
-    write_back(ch);
     console_on_char_from_irq(ch);
   }
 }

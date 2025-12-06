@@ -30,8 +30,7 @@ uint64_t read(int fd, void *buf, uint64_t len)
   return (int)a0; /* 返回读到的字节数或负数错误码 */
 }
 
-/* 用户侧 sleep：通过 ecall 进入 thread_sys_sleep */
-void thread_sleep(uint64_t ticks)
+void sleep(uint64_t ticks)
 {
   register uintptr_t a0 asm("a0") = SYS_SLEEP;
   register uintptr_t a1 asm("a1") = (uintptr_t)ticks;
