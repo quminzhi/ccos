@@ -2,6 +2,7 @@
 #define THREAD_H
 
 #include <stdint.h>
+#include <stddef.h>
 #include "trap.h"
 
 /* -------------------------------------------------------------------------- */
@@ -48,6 +49,9 @@ void threads_tick(void);
 /* 核心调度函数：在 trap 中切换当前线程 */
 void schedule(struct trapframe *tf);
 
+void thread_block(struct trapframe *tf);
+void thread_wake(tid_t tid);
+
 /* -------------------------------------------------------------------------- */
 /* Sleeping / syscalls                                                        */
 /* -------------------------------------------------------------------------- */
@@ -90,5 +94,9 @@ tid_t thread_current(void);
 const char *thread_name(tid_t tid);
 
 void print_thread_prefix(void);
+
+typedef int (*console_reader_t)(char *buf, size_t len);
+void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf);
+void thread_read_from_stdin(console_reader_t reader);
 
 #endif /* THREAD_H */

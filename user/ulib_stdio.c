@@ -202,3 +202,129 @@ int u_printf(const char *fmt, ...)
   }
   return n;
 }
+
+int u_read_line(int fd, char *buf, int buf_size)
+{
+  if (buf_size <= 1) {
+    return -1;
+  }
+
+  int used = 0;
+
+  for (;;) {
+    if (used >= buf_size - 1) {
+      // 缓冲区满了，直接结束这一行
+      break;
+    }
+
+    char c;
+    int n = read(fd, &c, 1);
+    if (n < 0) {
+      // 未来有错误码可以直接返回 n
+      return n;
+    }
+    if (n == 0) {
+      // EOF
+      if (used == 0) {
+        return 0;
+      }
+      break;
+    }
+
+    if (c == '\n' || c == '\r') {
+      // 行结束，丢掉行尾，不写入 buf
+      break;
+    }
+
+    buf[used++] = c;
+  }
+
+  buf[used] = '\0';
+  return used;
+}
+
+int u_getchar(void)
+{
+  unsigned char ch;
+  for (;;) {
+    int n = read(FD_STDIN, &ch, 1);
+    if (n > 0) {
+      return (int)ch;
+    }
+    if (n == 0) {
+      // EOF（目前你大概用不到），用 -1 表示
+      return -1;
+    }
+    // n < 0: 将来如果你有错误码，可以直接返回 n
+    return n;
+  }
+}
+
+/*
+ * 从 stdin 读一行：
+ *   - 一次 read 1 字节，一直读到 '\n' 或 '\r'（行尾不写入 buf）
+ *   - buf 永远是以 '\0' 结尾的字符串，例如 "exit"、"hello"
+ * 返回值：
+ *   >0 : 实际写入的字符数（不含行尾，不含 '\0'）
+ *   =0 : EOF（目前基本不会用到）
+ *   <0 : 错误（将来有错误码可以透传）
+ */
+int u_gets(char *buf, int buf_size)
+{
+  return u_read_line(FD_STDIN, buf, buf_size);
+}
+
+int u_readn(int fd, void *buf, int nbytes)
+{
+  char *p   = (char *)buf;
+  int total = 0;
+
+  while (total < nbytes) {
+    int n = read(fd, p + total, (uint64_t)(nbytes - total));
+    if (n < 0) {
+      // 将来有错误码可以直接 return n
+      return n;
+    }
+    if (n == 0) {
+      // EOF，提前结束
+      break;
+    }
+    total += n;
+  }
+  return total;  // 可能 < nbytes（遇到 EOF）
+}
+
+int u_read_until(int fd, char *buf, int buf_size, char delim)
+{
+  if (buf_size <= 1) {
+    return -1;
+  }
+
+  int used = 0;
+
+  for (;;) {
+    if (used >= buf_size - 1) {
+      // 缓冲区满了
+      break;
+    }
+
+    int n = read(fd, buf + used, 1);
+    if (n < 0) {
+      return n;
+    }
+    if (n == 0) {
+      // EOF
+      break;
+    }
+
+    char c = buf[used];
+    used++;
+
+    if (c == delim) {
+      break;  // 读到了分隔符
+    }
+  }
+
+  buf[used] = '\0';
+  return used;
+}

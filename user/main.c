@@ -26,17 +26,17 @@ static void thread_worker(void *arg)
   int n = (int)(uintptr_t)arg;
 
   print_thread_prefix();
-  pr_info("worker_thread started, doing some work...");
+  u_puts("worker_thread started, doing some work...");
 
   /* 模拟“工作一段时间” */
   for (int i = 0; i < n; ++i) {
     print_thread_prefix();
-    pr_info("worker_thread step");
+    u_puts("worker_thread step");
     thread_sleep(1); /* sleep 一下，给调度器机会切到别的线程 */
   }
 
   print_thread_prefix();
-  pr_info("worker_thread finished, calling thread_exit");
+  u_puts("worker_thread finished, calling thread_exit");
 
   /* 把 n 当作 exit_code 传回去，方便主线程在 join 后查看 */
   thread_exit(n);
@@ -46,38 +46,25 @@ static void console_worker(void *arg)
 {
   (void)arg;
 
-  char buf[128];
+  char line[128];
 
-  const char *banner =
-      "console worker started. type something (\"exit\" to quit):\n";
-  write(FD_STDOUT, banner, u_strlen(banner));
+  u_puts("console worker started. type something (\"exit\" to quit):");
 
-  // for (;;) {
-  //   int n = read(0, buf, sizeof(buf));
-  //   if (n <= 0) {
-  //     // 读失败 / 中断，简单忽略继续
-  //     continue;
-  //   }
+  for (;;) {
+    int len = u_gets(line, sizeof(line));
+    if (len <= 0) {
+      // 暂时简单处理：出错/EOF 就继续读
+      continue;
+    }
 
-  //   /* 尝试识别 "exit\n" / "quit\n" 指令 */
-  //   if ((n == 5 && buf[0] == 'e' && buf[1] == 'x' && buf[2] == 'i' &&
-  //        buf[3] == 't' && buf[4] == '\n') ||
-  //       (n == 5 && buf[0] == 'q' && buf[1] == 'u' && buf[2] == 'i' &&
-  //        buf[3] == 't' && buf[4] == '\n')) {
-  //     const char *bye = "console worker exiting.\n";
-  //     write(FD_STDOUT, bye, u_strlen(bye));
+    // line 已经没有末尾的 '\n' / '\r' 了
+    if (u_strcmp(line, "exit") == 0 || u_strcmp(line, "quit") == 0) {
+      u_puts("console worker exiting.");
+      thread_exit(0);  // noreturn
+    }
 
-  //     /* 以 0 作为 exit_code 退出线程 */
-  //     thread_exit(0);
-  //     /* 不会返回 */
-  //   }
-
-  //   /* 普通 echo：输出前缀 + 用户内容 */
-  //   const char *prefix = "you typed: ";
-  //   write(FD_STDOUT, prefix, u_strlen(prefix));
-  //   write(FD_STDOUT, buf, (uint64_t)n);
-  // }
-  thread_exit(0);
+    u_printf("you typed: %s\n", line);
+  }
 }
 
 void user_main(void *arg)
@@ -118,12 +105,12 @@ void user_main(void *arg)
     int status = 0;
 
     print_thread_prefix();
-    pr_info("main: joining console worker (type \"exit\" to quit it)...");
+    pr_info("main: joining console...");
 
     int rc = thread_join(console_tid, &status);
 
     print_thread_prefix();
-    pr_info("main: thread_join(console) returned rc=%x, exit_code=%x", rc,
+    pr_info("main: thread_join (console) returned rc=%x, exit_code=%x", rc,
             status);
   }
 

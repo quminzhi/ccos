@@ -7,6 +7,7 @@
 #include "platform.h"
 #include "riscv_csr.h"
 
+extern tid_t g_stdin_waiter;
 void *memset(void *s, int c, size_t n); /* klib.h */
 void arch_first_switch(struct trapframe *tf);
 
@@ -32,6 +33,7 @@ typedef enum {
   THREAD_SLEEPING = 3,
   THREAD_WAITING  = 4, /* thread_join 中，等待其它线程 */
   THREAD_ZOMBIE   = 5, /* 已退出，等待 join 回收     */
+  THREAD_BLOCKED  = 6, /* 通用阻塞：比如等 stdin 数据 */
 } ThreadState;
 
 typedef struct Thread {
@@ -50,6 +52,10 @@ typedef struct Thread {
   tid_t join_waiter;         /* 有谁在 join 我？（-1 表示没有） */
   tid_t waiting_for;         /* 我在 join 谁？（仅 WAITING 时有用） */
   uintptr_t join_status_ptr; /* join 时传入的 int*，保存 exit_code 用 */
+
+  /* 用于阻塞式 read 的上下文（最小版本：只支持一个 read 请求） */
+  uintptr_t pending_read_buf; /* 用户传来的 buf 指针 */
+  uint64_t pending_read_len;  /* 用户传来的 len      */
 } Thread;
 
 static Thread g_threads[THREAD_MAX];
@@ -168,15 +174,17 @@ void threads_init(void)
   g_current_tid = 1; /* main 线程假定为 tid=1 */
 
   for (int i = 0; i < THREAD_MAX; ++i) {
-    g_threads[i].id              = i;
-    g_threads[i].state           = THREAD_UNUSED;
-    g_threads[i].wakeup_tick     = 0;
-    g_threads[i].name            = "unused";
-    g_threads[i].stack_base      = NULL;
-    g_threads[i].exit_code       = 0;
-    g_threads[i].join_waiter     = -1;
-    g_threads[i].waiting_for     = -1;
-    g_threads[i].join_status_ptr = 0;
+    g_threads[i].id               = i;
+    g_threads[i].state            = THREAD_UNUSED;
+    g_threads[i].wakeup_tick      = 0;
+    g_threads[i].name             = "unused";
+    g_threads[i].stack_base       = NULL;
+    g_threads[i].exit_code        = 0;
+    g_threads[i].join_waiter      = -1;
+    g_threads[i].waiting_for      = -1;
+    g_threads[i].join_status_ptr  = 0;
+    g_threads[i].pending_read_buf = 0;
+    g_threads[i].pending_read_len = 0;
     tf_clear(&g_threads[i].tf);
   }
 
@@ -303,6 +311,31 @@ void schedule(struct trapframe *tf)
   next->state   = THREAD_RUNNING;
 
   *tf           = next->tf;
+}
+
+void thread_block(struct trapframe *tf)
+{
+  Thread *cur = &g_threads[g_current_tid];
+
+  cur->state  = THREAD_BLOCKED;
+  schedule(tf);
+
+  /* 注意：
+   *  - 对当前线程而言，这个 schedule() 不会“回来”继续执行，
+   *    它的内核调用栈就此终止，等以后再被调度时，会直接从 user 慢慢往前跑。
+   *  - 也就是说，不要在这里后面再写逻辑。
+   */
+}
+
+void thread_wake(tid_t tid)
+{
+  if (tid < 0 || tid >= THREAD_MAX) {
+    return;
+  }
+  Thread *t = &g_threads[tid];
+  if (t->state == THREAD_BLOCKED) {
+    t->state = THREAD_RUNNABLE;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -455,4 +488,46 @@ void print_thread_prefix(void)
   platform_putc(':');
   platform_putc(mode);
   platform_puts("] ");
+}
+
+void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf)
+{
+  /* 没数据：登记 read 上下文，并 block 当前线程 */
+  Thread *cur           = &g_threads[thread_current()];
+
+  cur->pending_read_buf = (uintptr_t)buf;
+  cur->pending_read_len = len;
+
+  /* 这里不返回给当前线程，而是把它挂起 */
+  g_stdin_waiter        = cur->id;
+  thread_block(tf);
+}
+
+void thread_read_from_stdin(console_reader_t read)
+{
+  Thread *t = &g_threads[g_stdin_waiter];
+
+  if (t->pending_read_buf == 0 || t->pending_read_len == 0) {
+    thread_wake(g_stdin_waiter);
+    return;
+  }
+
+  char *user_buf = (char *)t->pending_read_buf;
+  size_t max_len = (size_t)t->pending_read_len;
+
+  int n          = read(user_buf, max_len);
+  if (n <= 0) {
+    // 没读到东西（极端 race），那就等下次中断再说
+    return;
+  }
+
+  /* 设置 read 的返回值：下次这线程被调度、trap 返回时，用户看到的是 n */
+  t->tf.a0            = (uintptr_t)n;
+
+  /* 清理 pending_read 上下文 */
+  t->pending_read_buf = 0;
+  t->pending_read_len = 0;
+
+  /* 4. 唤醒线程，并把 waiter 标记清掉 */
+  thread_wake(g_stdin_waiter);
 }

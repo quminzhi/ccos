@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define FD_STDIN  0
+#define FD_STDOUT 1
+#define FD_STDERR 2
+
 /* ===== memory ===== */
 
 void *u_memcpy(void *dst, const void *src, size_t n);
@@ -31,5 +35,11 @@ int u_putchar(int c);                // 输出单个字符到 stdout
 int u_puts(const char *s);           // 输出字符串 + '\n'
 int u_printf(const char *fmt, ...);  // 最小 printf: %s %d %u %x %p %c %%
 int u_snprintf(char *buf, size_t sz, const char *fmt, ...);
+int u_read_line(int fd, char *buf, int buf_size);
+int u_getchar(void);                         // 从 stdin 读一个字符
+int u_gets(char *buf, int buf_size);         // 从 stdin 读一行，去掉行尾 \r\n
+int u_readn(int fd, void *buf, int nbytes);  // 试图读满 nbytes
+int u_read_until(int fd, char *buf, int buf_size,
+                 char delim);  // 一直读到 delim 或 buffer 满
 
 #endif  // ULIB_H

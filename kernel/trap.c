@@ -102,6 +102,8 @@ static uintptr_t syscall_handler(struct trapframe *tf)
   const uintptr_t sys_id = tf->a0;
   const uintptr_t sepc   = tf->sepc;
 
+  uint64_t nwrite, nread;
+
   switch (sys_id) {
     case SYS_SLEEP:
       ADVANCE_SEPC();
@@ -125,17 +127,22 @@ static uintptr_t syscall_handler(struct trapframe *tf)
       break;
     case SYS_WRITE:
       ADVANCE_SEPC();
-      uint64_t nwrite =
-          sys_write((int)tf->a1, (const char *)tf->a2, (uint64_t)tf->a3);
+      nwrite = sys_write((int)tf->a1, (const char *)tf->a2, (uint64_t)tf->a3);
       tf->a0 = nwrite;
       break;
     case SYS_READ:
       ADVANCE_SEPC();
-      uint64_t nread = sys_read((int)tf->a1, (char *)tf->a2, (uint64_t)tf->a3);
-      tf->a0         = nread;
+      int is_non_block_read = 0;
+      nread = sys_read((int)tf->a1, (char *)tf->a2, (uint64_t)tf->a3, tf,
+                       &is_non_block_read);
+      if (is_non_block_read) {
+        tf->a0 = nread;
+      } else {
+        // block and this is another thread!
+      }
       break;
     default:
-      ADVANCE_SEPC();  // 仍然要跳过 ecall 防止死循环
+      ADVANCE_SEPC();
       dump_trap(tf);
       panic("unknown syscall");
       break;
