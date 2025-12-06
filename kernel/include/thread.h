@@ -25,7 +25,7 @@
 /* -------------------------------------------------------------------------- */
 
 typedef int tid_t; /* 线程 ID = g_threads[] 的 index      */
-typedef void (*thread_entry_t)(void *arg);
+typedef void (*thread_entry_t)(void *arg) __attribute__((noreturn));
 
 /* -------------------------------------------------------------------------- */
 /* Core thread API                                                            */
@@ -60,6 +60,9 @@ void thread_sys_sleep(struct trapframe *tf, uint64_t ticks);
 /* trap_handler 用：
  *  - 处理 SYS_THREAD_EXIT：把当前线程标记为 ZOMBIE，唤醒 joiner。
  *  - 不会返回到调用 thread_exit() 的那条 C 语句。
+ * thread_sys_exit 不能 标成 noreturn。
+ * 它逻辑上不会回到用户态的那条语句，但在 C 语义里“会从函数返回”，所以不能对
+ * 编译器说它是 noreturn。
  */
 void thread_sys_exit(struct trapframe *tf, int exit_code);
 

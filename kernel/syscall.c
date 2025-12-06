@@ -1,6 +1,6 @@
 #include "syscall.h"
 
-int sys_write(int fd, const void *buf, uint64_t len)
+uint64_t write(int fd, const void *buf, uint64_t len)
 {
   register uintptr_t a0 asm("a0") = SYS_WRITE;
   register uintptr_t a1 asm("a1") = (uintptr_t)fd;
@@ -15,7 +15,7 @@ int sys_write(int fd, const void *buf, uint64_t len)
   return (int)a0; /* 返回写入的字节数或负数错误码 */
 }
 
-int sys_read(int fd, void *buf, uint64_t len)
+uint64_t read(int fd, void *buf, uint64_t len)
 {
   register uintptr_t a0 asm("a0") = SYS_READ;
   register uintptr_t a1 asm("a1") = (uintptr_t)fd;

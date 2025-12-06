@@ -2,12 +2,12 @@
 #include <stddef.h>
 
 #include "thread.h"
-#include "klib.h"
 #include "trap.h"
 #include "log.h"
 #include "platform.h"
 #include "riscv_csr.h"
 
+void *memset(void *s, int c, size_t n); /* klib.h */
 void arch_first_switch(struct trapframe *tf);
 
 /* -------------------------------------------------------------------------- */
@@ -57,6 +57,8 @@ static uint8_t g_thread_stacks[THREAD_MAX][THREAD_STACK_SIZE];
 
 static tid_t g_current_tid = 0;
 static uint64_t g_ticks    = 0;
+
+static void idle_main(void *arg) __attribute__((noreturn));
 
 /* -------------------------------------------------------------------------- */
 /* Internal helpers                                                           */
@@ -210,7 +212,7 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name)
   t->join_waiter     = -1;
   t->waiting_for     = -1;
   t->join_status_ptr = 0;
-  t->is_user = KERN_THREAD;
+  t->is_user         = KERN_THREAD;
 
   init_thread_context_s(t, entry, arg);
 
@@ -362,7 +364,6 @@ void thread_sys_exit(struct trapframe *tf, int exit_code)
 
   /* 不在这里回收 slot，留给 join() 做 */
   schedule(tf);
-  /* 不会返回到调用 thread_exit() 的那条 C 语句 */
 }
 
 /* join 的内核实现：
@@ -441,12 +442,11 @@ const char *thread_name(tid_t tid)
   return t->name;
 }
 
-
 void print_thread_prefix(void)
 {
   tid_t tid        = thread_current();
   const char *name = thread_name(tid);
-  char mode = g_threads[tid].is_user ? 'U' : 'S';
+  char mode        = g_threads[tid].is_user ? 'U' : 'S';
 
   platform_putc('[');
   platform_put_hex64((uintptr_t)tid);

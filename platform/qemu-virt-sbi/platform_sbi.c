@@ -5,9 +5,12 @@
 #include "riscv_csr.h"
 #include "uart_16550.h"
 #include "platform.h"
+#include "plic.h"
 #include "sbi.h"
 
-/* ========== 1. 输出相关 ========== */
+/* ========== 输出相关 ========== */
+
+void platform_uart_init() { uart16550_init(); }
 
 void platform_put_dec_us(uint64_t x);
 
@@ -89,13 +92,7 @@ void platform_puts(const char* s)
   uart16550_puts(s);
 }
 
-void platform_idle(void)
-{
-  __asm__ volatile("nop");
-  // __asm__ volatile("wfi");
-}
-
-/* ========== 2. 定时器相关 ========== */
+/* ========== 定时器相关 ========== */
 
 platform_time_t platform_time_now(void)
 {
@@ -111,10 +108,48 @@ void platform_timer_start_after(platform_time_t delta_ticks)
   platform_timer_start_at(now + delta_ticks);
 }
 
-/* ========== 3. 平台初始化 ========== */
+/* ========== PLIC ========== */
 
-void platform_early_init()
+void platform_plic_init(void)
 {
-  uart16550_init();
-  // plic_init();
+  // 1. S-mode PLIC context
+  plic_init_s_mode();
+
+  // 2. 开 UART0 中断
+  plic_set_priority(PLIC_IRQ_UART0, 1);
+  plic_enable_irq(PLIC_IRQ_UART0);
+
+  // 3. S-mode 打开外部中断
+  csr_set(sie, SIE_SEIE);
+  csr_set(sstatus, SSTATUS_SIE);
+}
+
+void platform_handle_s_external(struct trapframe* tf)
+{
+  (void)tf;  // 暂时用不到
+
+  uint32_t irq = plic_claim();
+  if (!irq) {
+    return;  // spurious
+  }
+
+  switch (irq) {
+    case PLIC_IRQ_UART0:
+      uart16550_irq();
+      break;
+    default:
+      // 临时：可以打个 log 看看
+      platform_puts("unknown PLIC irq\n");
+      break;
+  }
+
+  plic_complete(irq);
+}
+
+/* ========== MISC ========== */
+
+void platform_idle(void)
+{
+  __asm__ volatile("nop");
+  // __asm__ volatile("wfi");
 }

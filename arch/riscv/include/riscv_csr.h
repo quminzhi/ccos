@@ -194,6 +194,12 @@ enum {
     __asm__ __volatile__("csrc " #csr ", %0" : : "r"(__m) : "memory"); \
   } while (0)
 
+#define csr_set(csr, mask)                                             \
+  do {                                                                 \
+    uintptr_t __m = (uintptr_t)(mask);                                 \
+    __asm__ __volatile__("csrs " #csr ", %0" : : "r"(__m) : "memory"); \
+  } while (0)
+
 /* mtvec 低 2 bit 是 mode */
 
 #define MTVEC_MODE_MASK     0x3UL

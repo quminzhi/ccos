@@ -8,7 +8,11 @@
 #include "syscall.h"
 #include "log.h"
 #include "panic.h"
+#include "sysfile.h"
 
+#ifndef NDEBUG
+extern void print_thread_prefix(void);
+#endif
 extern void trap_entry(void);
 
 #ifndef KERNEL_STACK_SIZE
@@ -32,13 +36,9 @@ void trap_init(void)
   ksp &= ~(reg_t)0xFUL;
   csr_write(sscratch, ksp);
 
-  // 这里先关掉所有 S-mode 中断，由后面的 enable_xxx 再打开
+  // 这里先关掉所有 S-mode 中断，platform_plic_init开启
   csr_clear(sstatus, SSTATUS_SIE);
   csr_clear(sie, SIE_STIE | SIE_SEIE | SIE_SSIE);
-
-  // /* 4. 为 platform0 配一个非 0 的优先级，并在当前 hart 使能它 */
-  // plic_set_priority(PLIC_IRQ_platform0, 1);
-  // plic_enable_irq(PLIC_IRQ_platform0);
 }
 
 static void timer_handler(struct trapframe *tf)
@@ -123,20 +123,17 @@ static uintptr_t syscall_handler(struct trapframe *tf)
       thread_sys_create(tf, (thread_entry_t)tf->a1, (void *)tf->a2,
                         (const char *)tf->a3);
       break;
-
-      // 以后想开 write/read，直接在这加 case 就行
-      /*
-      case SYS_WRITE:
-        ADVANCE_SEPC();
-        platform_sys_write(tf, (int)tf->a1, tf->a2, tf->a3);
-        break;
-
-      case SYS_READ:
-        ADVANCE_SEPC();
-        platform_sys_read(tf, (int)tf->a1, tf->a2, tf->a3);
-        break;
-      */
-
+    case SYS_WRITE:
+      ADVANCE_SEPC();
+      uint64_t nwrite =
+          sys_write((int)tf->a1, (const char *)tf->a2, (uint64_t)tf->a3);
+      tf->a0 = nwrite;
+      break;
+    case SYS_READ:
+      ADVANCE_SEPC();
+      uint64_t nread = sys_read((int)tf->a1, (char *)tf->a2, (uint64_t)tf->a3);
+      tf->a0         = nread;
+      break;
     default:
       ADVANCE_SEPC();  // 仍然要跳过 ecall 防止死循环
       dump_trap(tf);
@@ -146,10 +143,6 @@ static uintptr_t syscall_handler(struct trapframe *tf)
 
   return tf->sepc;
 }
-
-#ifndef NDEBUG
-extern void print_thread_prefix(void);
-#endif
 
 uintptr_t trap_entry_c(struct trapframe *tf)
 {
@@ -173,11 +166,13 @@ uintptr_t trap_entry_c(struct trapframe *tf)
         /* S-mode timer interrupt */
         timer_handler(tf);
         return tf->sepc;
+      case IRQ_EXT_S:
+        platform_handle_s_external(tf);
+        return tf->sepc;
 
-        // 以后有外部中断、软件中断，可以继续在这里加 case
+        // TODO: 以后有软件中断，可以继续在这里加 case
 
       default:
-        // 先跳到下面的“未处理 trap”打印逻辑
         break;
     }
   } else {
