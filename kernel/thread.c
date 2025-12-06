@@ -33,6 +33,7 @@ typedef struct Thread {
   uint64_t wakeup_tick; /* SLEEPING 时的唤醒 tick（绝对时间） */
   const char *name;
   int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
+  int can_be_killed;
 
   struct trapframe tf; /* 保存的寄存器上下文 */
 
@@ -170,6 +171,7 @@ void threads_init(void)
     g_threads[i].wakeup_tick      = 0;
     g_threads[i].name             = "unused";
     g_threads[i].stack_base       = NULL;
+    g_threads[i].can_be_killed    = 0;
     g_threads[i].exit_code        = 0;
     g_threads[i].join_waiter      = -1;
     g_threads[i].waiting_for      = -1;
@@ -180,10 +182,10 @@ void threads_init(void)
   }
 
   /* tid 0: idle (S-mode) */
-  Thread *idle     = &g_threads[0];
-  idle->state      = THREAD_RUNNABLE;
-  idle->name       = "idle";
-  idle->stack_base = g_thread_stacks[0];
+  Thread *idle        = &g_threads[0];
+  idle->state         = THREAD_RUNNABLE;
+  idle->name          = "idle";
+  idle->stack_base    = g_thread_stacks[0];
   init_thread_context_s(idle, idle_main, NULL);
 }
 
@@ -227,12 +229,13 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
     return -1;
   }
 
-  Thread *t      = &g_threads[tid];
-  t->state       = THREAD_RUNNABLE;
-  t->wakeup_tick = 0;
-  t->name        = name ? name : "uthread";
-  t->stack_base  = g_thread_stacks[tid];
-  t->is_user     = USER_THREAD;
+  Thread *t        = &g_threads[tid];
+  t->state         = THREAD_RUNNABLE;
+  t->wakeup_tick   = 0;
+  t->name          = name ? name : "uthread";
+  t->stack_base    = g_thread_stacks[tid];
+  t->is_user       = USER_THREAD;
+  t->can_be_killed = 1;
 
   init_thread_context_u(t, entry, arg);
 
@@ -249,6 +252,7 @@ tid_t threads_exec(thread_entry_t user_main, void *arg)
 
   g_current_tid = tid;
   Thread *t     = &g_threads[tid];
+  t->can_be_killed = 0;
   arch_first_switch(&t->tf);  // 不会返回
 
   for (;;) {
@@ -494,30 +498,33 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
     return;
   }
 
-  /* 杀自己：直接走正常 exit 流程（不会返回） */
   if (target_tid == g_current_tid) {
-    thread_sys_exit(tf, THREAD_EXITCODE_SIGKILL);
-    __builtin_unreachable();
+    tf->a0 = -4;  // 不允许通过 kill 自杀（让用户态用 thread_exit）
+    return;
   }
 
   Thread *t = &g_threads[target_tid];
+
+  if (t->can_be_killed == 0) {
+    tf->a0 = -3;  // 该线程不许killed
+    return;
+  }
 
   if (t->state == THREAD_UNUSED) {
     tf->a0 = -3;  // ESRCH: 不存在
     return;
   }
 
-  /* 已经 ZOMBIE 了就当成功 */
   if (t->state == THREAD_ZOMBIE) {
-    tf->a0 = 0;
+    tf->a0 = 0;  // 已经死了，当成功
     return;
   }
 
   /* 强制标记为 ZOMBIE（SIGKILL 风格） */
-  t->exit_code = THREAD_EXITCODE_SIGKILL;
+  t->exit_code = THREAD_EXITCODE_SIGKILL;  // -9
   t->state     = THREAD_ZOMBIE;
 
-  /* 如果有人在 join 它，按正常 exit 的逻辑处理一下 joiner */
+  /* 如果有人在 join 它，就按正常 exit 的逻辑处理 joiner */
   if (t->join_waiter >= 0 && t->join_waiter < THREAD_MAX) {
     Thread *w = &g_threads[t->join_waiter];
 
@@ -526,10 +533,9 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
       *p     = t->exit_code;
     }
 
-    w->tf.a0           = 0;  // join 返回 0 = 成功
+    w->tf.a0           = 0;  // join 返回 0
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
-
     if (w->state == THREAD_WAITING) {
       w->state = THREAD_RUNNABLE;  // 唤醒 joiner
     }
@@ -537,7 +543,7 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
 
   t->join_waiter = -1;
 
-  /* 槽的回收仍然由 join() 负责 */
+  /* 槽回收仍然在 join() 里做 */
   tf->a0         = 0;
 }
 

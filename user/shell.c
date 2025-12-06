@@ -241,6 +241,9 @@ static void cmd_jobs(int argc, char **argv)
   }
 }
 
+extern tid_t thread_current(
+    void);  // 你 kernel 里已经有，user 态那边应该也有 stub
+
 static void cmd_kill(int argc, char **argv)
 {
   if (argc < 2) {
@@ -254,11 +257,19 @@ static void cmd_kill(int argc, char **argv)
     return;
   }
 
+  tid_t self = thread_current();
+  if (tid == self) {
+    u_puts("kill: killing myself...");
+    // 正常自杀：走已经验证过的 thread_exit 路径
+    thread_exit(THREAD_EXITCODE_SIGKILL);
+    // 不会返回
+  }
+
   int rc = thread_kill((tid_t)tid);
   if (rc < 0) {
     u_printf("kill: failed to kill tid=%d, rc=%d\n", tid, rc);
   } else {
-    u_printf("kill: sent kill to tid=%d\n", tid);
+    u_printf("kill: sent SIGKILL to tid=%d\n", tid);
   }
 }
 
