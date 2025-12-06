@@ -374,7 +374,7 @@ int u_getchar(void)
 
 int u_gets(char *buf, int buf_size)
 {
-  if (buf_size <= 1) {
+  if (!buf || buf_size <= 1) {
     return -1;
   }
 
@@ -384,52 +384,64 @@ int u_gets(char *buf, int buf_size)
     char c;
     int n = read(FD_STDIN, &c, 1);
     if (n < 0) {
-      // 将来有错误码可以直接 return n
+      // 真正的 read 错误，直接返回错误码
       return n;
     }
     if (n == 0) {
-      // EOF：如果啥都没读到，就返回 0
+      // EOF：如果一行一个字节都没读到，就返回 0
       if (used == 0) {
         return 0;
       }
       break;
     }
 
-    /* 处理行结束：回车 / 换行 */
+    unsigned char uc = (unsigned char)c;
+
+    /* ---- Ctrl-C：中断当前行 ---- */
+    if (uc == 0x03) {  // ASCII ETX，Ctrl-C
+      // 回显 ^C 并换行（看起来和常见 shell 一样）
+      u_putchar('^');
+      u_putchar('C');
+      u_putchar('\n');
+
+      // 丢弃当前行
+      buf[0] = '\0';
+      used   = 0;
+
+      // 告诉上层：这一行被 Ctrl-C 打断了
+      return U_GETS_INTR;
+    }
+
+    /* ---- 行结束：回车/换行 ---- */
     if (c == '\n' || c == '\r') {
-      // 回显换行（尽量友好一点）
       u_putchar('\n');
       break;
     }
 
-    /* 处理退格：支持 '\b' (0x08) 和 DEL (0x7f) */
-    if (c == '\b' || (unsigned char)c == 0x7f) {
+    /* ---- 退格：\b 或 DEL ---- */
+    if (c == '\b' || uc == 0x7f) {
       if (used > 0) {
         used--;
-        // 在终端上擦掉一个字符：光标左移、写空格、再左移
+        // 在终端上擦掉最后一个字符：左移、写空格、再左移
         u_putchar('\b');
         u_putchar(' ');
         u_putchar('\b');
-      } else {
-        // 行为空时收到退格：可以选择忽略，或者输出 '\a' 嘟一声
-        // u_putchar('\a');
       }
       continue;
     }
 
-    /* 其它控制字符直接忽略（你也可以自己扩展） */
-    if ((unsigned char)c < 0x20) {
+    /* 其它控制字符先忽略（你以后可以扩展） */
+    if (uc < 0x20) {
       continue;
     }
 
-    /* 正常可见字符：加入缓冲区 + 回显 */
+    /* ---- 正常可见字符 ---- */
     if (used < buf_size - 1) {
       buf[used++] = c;
       u_putchar(c);
     } else {
-      // 缓冲区满了：可以忽略后续字符，也可以提示一下
-      // 简单起见：丢弃输入
-      // u_putchar('\a');  // 提示一下也行
+      // 行太长：简单丢弃后续字符，也可以选择响铃一下
+      // u_putchar('\a');
     }
   }
 

@@ -5,6 +5,7 @@
 
 typedef int tid_t; /* 线程 ID = g_threads[] 的 index      */
 typedef void (*thread_entry_t)(void *arg) __attribute__((noreturn));
+tid_t thread_current(void);
 
 typedef enum {
   THREAD_UNUSED   = 0,

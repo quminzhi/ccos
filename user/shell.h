@@ -1,6 +1,6 @@
 #pragma once
 
-#include "thread.h"
+#include "thread_sys.h"
 
 /*
  * 启动一个 shell 线程：

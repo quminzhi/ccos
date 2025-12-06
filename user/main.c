@@ -23,7 +23,7 @@ void user_main(void *arg)
 {
   (void)arg;
 
-  u_puts("system init done.");
+  u_puts("Welcome, hacker!");
 
   for (;;) {
     tid_t shell_tid = shell_start();

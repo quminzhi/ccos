@@ -33,6 +33,8 @@ void main(long hartid, long dtb_pa)
   /* 启动第一次定时器 */
   platform_timer_start_after(DELTA_TICKS);
 
+  pr_info("system init done, starting user main...");
+
   /* exec user main */
   threads_exec(user_main, NULL);
 

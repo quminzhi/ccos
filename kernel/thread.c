@@ -182,10 +182,10 @@ void threads_init(void)
   }
 
   /* tid 0: idle (S-mode) */
-  Thread *idle        = &g_threads[0];
-  idle->state         = THREAD_RUNNABLE;
-  idle->name          = "idle";
-  idle->stack_base    = g_thread_stacks[0];
+  Thread *idle     = &g_threads[0];
+  idle->state      = THREAD_RUNNABLE;
+  idle->name       = "idle";
+  idle->stack_base = g_thread_stacks[0];
   init_thread_context_s(idle, idle_main, NULL);
 }
 
@@ -250,8 +250,8 @@ tid_t threads_exec(thread_entry_t user_main, void *arg)
     pr_err("no slot for user_main\n");
   }
 
-  g_current_tid = tid;
-  Thread *t     = &g_threads[tid];
+  g_current_tid    = tid;
+  Thread *t        = &g_threads[tid];
   t->can_be_killed = 0;
   arch_first_switch(&t->tf);  // 不会返回
 
@@ -360,18 +360,19 @@ void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
   tf->a0    = (uintptr_t)tid;  // 返回 tid 给用户态
 }
 
-/* thread_exit 的内核实现：不会返回 */
 void thread_sys_exit(struct trapframe *tf, int exit_code)
 {
   Thread *cur    = &g_threads[g_current_tid];
+  tid_t self_tid = g_current_tid;
+  tid_t joiner   = cur->join_waiter;
 
-  /* 保存当前上下文（主要为了调试） */
+  /* 保存当前上下文（主要为了调试 / backtrace） */
   cur->tf        = *tf;
   cur->exit_code = exit_code;
   cur->state     = THREAD_ZOMBIE;
 
-  if (cur->join_waiter >= 0) {
-    Thread *w = &g_threads[cur->join_waiter];
+  if (joiner >= 0 && joiner < THREAD_MAX) {
+    Thread *w = &g_threads[joiner];
 
     /* 如果 join 时传了 status 指针，这里写入 exit_code */
     if (w->join_status_ptr != 0) {
@@ -385,12 +386,18 @@ void thread_sys_exit(struct trapframe *tf, int exit_code)
     /* 清理等待关系并唤醒 joiner */
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
-    w->state           = THREAD_RUNNABLE;
+    if (w->state == THREAD_WAITING) {
+      w->state = THREAD_RUNNABLE;
+    }
+
+    /* 有 joiner 的话，直接在这里回收自己，避免长期 ZOMBIE */
+    recycle_thread(self_tid);
   }
 
   cur->join_waiter = -1;
 
-  /* 不在这里回收 slot，留给 join() 做 */
+  /* 注意：没有 joiner 的线程保持 ZOMBIE 状态，等将来别的线程 join 它。 */
+
   schedule(tf);
 }
 
@@ -448,9 +455,9 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
   /* 阻塞当前线程，切换到其它线程。
    *
    * 注意：
-   *  - 此时不要写 tf->a0（返回值），因为马上要被别的线程的 tf 覆盖。
-   *  - 当目标 thread_exit() 时，会在 w->tf.a0 写入 0（成功），
-   *    然后把 joiner 的 state 变成 RUNNABLE。
+   *  - 这里之后不要再写任何逻辑了！
+   *  - 我们不在这里设置返回值；返回值由 thread_sys_exit()
+   *    在唤醒 joiner 的时候，通过修改 w->tf.a0=0 来完成。
    */
   schedule(tf);
 }
@@ -506,7 +513,7 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
   Thread *t = &g_threads[target_tid];
 
   if (t->can_be_killed == 0) {
-    tf->a0 = -3;  // 该线程不许killed
+    tf->a0 = -3;  // 该线程不许 killed
     return;
   }
 
@@ -520,30 +527,39 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
     return;
   }
 
+  /* 记录一下是否有 joiner */
+  tid_t joiner = t->join_waiter;
+
   /* 强制标记为 ZOMBIE（SIGKILL 风格） */
-  t->exit_code = THREAD_EXITCODE_SIGKILL;  // -9
+  t->exit_code = THREAD_EXITCODE_SIGKILL;  // 一般是 -9
   t->state     = THREAD_ZOMBIE;
 
   /* 如果有人在 join 它，就按正常 exit 的逻辑处理 joiner */
-  if (t->join_waiter >= 0 && t->join_waiter < THREAD_MAX) {
-    Thread *w = &g_threads[t->join_waiter];
+  if (joiner >= 0 && joiner < THREAD_MAX) {
+    Thread *w = &g_threads[joiner];
 
     if (w->join_status_ptr != 0) {
       int *p = (int *)w->join_status_ptr;
       *p     = t->exit_code;
     }
 
-    w->tf.a0           = 0;  // join 返回 0
+    /* 设置 join 返回值为 0（成功） */
+    w->tf.a0           = 0;
+
+    /* 清理等待关系并唤醒 joiner */
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
     if (w->state == THREAD_WAITING) {
-      w->state = THREAD_RUNNABLE;  // 唤醒 joiner
+      w->state = THREAD_RUNNABLE;
     }
+
+    /* 有 joiner 的话，立刻回收被 kill 的线程 slot，避免长期 ZOMBIE */
+    recycle_thread(target_tid);
   }
 
   t->join_waiter = -1;
 
-  /* 槽回收仍然在 join() 里做 */
+  /* kill syscall 本身的返回值：0 = 成功 */
   tf->a0         = 0;
 }
 

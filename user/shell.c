@@ -7,8 +7,45 @@
 /* 配置                                                                       */
 /* -------------------------------------------------------------------------- */
 
-#define SHELL_MAX_LINE 128
-#define SHELL_MAX_ARGS 8
+#define SHELL_MAX_LINE  128
+#define SHELL_MAX_ARGS  8
+#define SHELL_MAX_PROCS 4
+
+typedef struct ShellProc {
+  int in_use;
+  char line[SHELL_MAX_LINE];
+} ShellProc;
+
+static ShellProc g_procs[SHELL_MAX_PROCS];
+
+static ShellProc *shell_proc_alloc(const char *line)
+{
+  for (int i = 0; i < SHELL_MAX_PROCS; ++i) {
+    ShellProc *p = &g_procs[i];
+    if (!p->in_use) {
+      p->in_use = 1;
+
+      // 安全拷贝命令行，确保以 '\0' 结尾
+      int j     = 0;
+      while (line[j] && j < SHELL_MAX_LINE - 1) {
+        p->line[j] = line[j];
+        ++j;
+      }
+      p->line[j] = '\0';
+
+      return p;
+    }
+  }
+
+  return NULL;  // 没空位
+}
+
+static void shell_proc_free(ShellProc *p)
+{
+  if (!p) return;
+  p->in_use  = 0;
+  p->line[0] = '\0';
+}
 
 /* -------------------------------------------------------------------------- */
 /* 小工具函数                                                                 */
@@ -33,6 +70,26 @@ static int shell_atoi(const char *s)
   }
 
   return neg ? -val : val;
+}
+
+#define SHELL_READ_OK   1  /* 正常读到一行，line 里有内容 */
+#define SHELL_READ_EOF  0  /* EOF / 无内容 */
+#define SHELL_READ_INTR -2 /* 被 Ctrl-C 中断 */
+#define SHELL_READ_ERR  -1 /* 其他错误 */
+
+static int shell_read_line(char *line, int line_size)
+{
+  int len = u_gets(line, line_size);
+  if (len == U_GETS_INTR) {
+    return SHELL_READ_INTR;
+  }
+  if (len < 0) {
+    return SHELL_READ_ERR;
+  }
+  if (len == 0) {
+    return SHELL_READ_EOF;
+  }
+  return SHELL_READ_OK;
 }
 
 /* 把一行按空白拆成 argv[]，原地在 line 里插入 '\0' 作为分隔 */
@@ -100,6 +157,8 @@ typedef struct {
   const char *name;
   shell_cmd_fn fn;
   const char *help;
+  int run_in_shell;  // 1 = 在 shell 线程中直接执行（不 spawn 子线程）
+                     // 0 = 通过 sh-cmd 子线程执行（create + join）
 } shell_cmd_t;
 
 /* 前向声明命令处理函数 */
@@ -113,13 +172,13 @@ static void cmd_kill(int argc, char **argv);
 
 /* 命令表 */
 static const shell_cmd_t g_shell_cmds[] = {
-    {"help",  cmd_help,  "show this help"              },
-    {"echo",  cmd_echo,  "echo arguments"              },
-    {"sleep", cmd_sleep, "sleep <ticks> (thread sleep)"},
-    {"ps",    cmd_ps,    "list threads"                },
-    {"jobs",  cmd_jobs,  "list user threads"           },
-    {"kill",  cmd_kill,  "kill <tid>"                  },
-    {"exit",  cmd_exit,  "exit shell"                  },
+    {"help",  cmd_help,  "show this help",               1},
+    {"echo",  cmd_echo,  "echo arguments",               1}, // 也可以设成 0，看你喜好
+    {"sleep", cmd_sleep, "sleep <ticks> (thread sleep)", 0},
+    {"ps",    cmd_ps,    "list threads",                 1},
+    {"jobs",  cmd_jobs,  "list user threads",            1},
+    {"kill",  cmd_kill,  "kill <tid>",                   1},
+    {"exit",  cmd_exit,  "exit shell",                   1},
 };
 
 static const int g_shell_cmd_count =
@@ -241,9 +300,6 @@ static void cmd_jobs(int argc, char **argv)
   }
 }
 
-extern tid_t thread_current(
-    void);  // 你 kernel 里已经有，user 态那边应该也有 stub
-
 static void cmd_kill(int argc, char **argv)
 {
   if (argc < 2) {
@@ -277,40 +333,143 @@ static void cmd_kill(int argc, char **argv)
 /* shell 主循环                                                               */
 /* -------------------------------------------------------------------------- */
 
+static void __attribute__((noreturn)) shell_cmd_worker(void *arg)
+{
+  ShellProc *proc = (ShellProc *)arg;
+
+  /* 1. 拷一份到自己的栈上，避免直接在全局 buffer 上原地改 */
+  char line[SHELL_MAX_LINE];
+  {
+    int i = 0;
+    while (proc->line[i] && i < SHELL_MAX_LINE - 1) {
+      line[i] = proc->line[i];
+      ++i;
+    }
+    line[i] = '\0';
+  }
+
+  /* 这个 “进程” 不再需要，释放 slot */
+  shell_proc_free(proc);
+
+  /* 2. 解析成 argc/argv */
+  char *argv[SHELL_MAX_ARGS];
+  int argc = shell_parse_line(line, argv, SHELL_MAX_ARGS);
+  if (argc == 0) {
+    thread_exit(0);
+  }
+
+  /* 3. 找到命令实现 */
+  const shell_cmd_t *cmd = shell_find_cmd(argv[0]);
+  if (!cmd) {
+    u_printf("unknown command: %s\n", argv[0]);
+    thread_exit(-1);
+  }
+
+  /* 4. 真正执行命令（命令函数返回 = 程序退出） */
+  cmd->fn(argc, argv);
+
+  /* 5. 正常退出 */
+  thread_exit(0);
+  __builtin_unreachable();
+}
+
+/*
+ * 在前台运行一条命令：
+ *   - line: 原始命令行（不含换行）
+ * 返回：
+ *   - >=0: 子线程的 exit_code
+ *   - < 0: 表示创建/等待过程中出错（不是命令返回值）
+ */
+static int shell_run_command(const char *line)
+{
+  ShellProc *proc = shell_proc_alloc(line);
+  if (!proc) {
+    u_puts("shell: no free proc slot (too many concurrent commands)");
+    return -1;
+  }
+
+  tid_t tid = thread_create(shell_cmd_worker, (void *)proc, "sh-cmd");
+  if (tid < 0) {
+    shell_proc_free(proc);
+    u_puts("shell: failed to create command thread");
+    return -2;
+  }
+
+  int status = 0;
+  int rc     = thread_join(tid, &status);
+  if (rc < 0) {
+    u_printf("shell: thread_join failed, rc=%d\n", rc);
+    return -3;
+  }
+
+  // 这里你可以选择打印退出码（调试时很有用）
+  // u_printf("[cmd exit] tid=%d, status=%d\n", tid, status);
+
+  return status;  // 类似 waitpid 拿到的 WEXITSTATUS
+}
+
+static void shell_dispatch_line(char *line)
+{
+  /* 先解析成 argv，用来识别 builtin */
+  char raw_line[SHELL_MAX_LINE];
+
+  int i = 0;
+  while (line[i] && i < SHELL_MAX_LINE - 1) {
+    raw_line[i] = line[i];
+    ++i;
+  }
+  raw_line[i] = '\0';
+
+  /* 在 line 上原地解析 argv（可以安全插 '\0'）*/
+  char *argv[SHELL_MAX_ARGS];
+  int argc = shell_parse_line(line, argv, SHELL_MAX_ARGS);
+  if (argc == 0) {
+    return;  // 空行
+  }
+
+  const shell_cmd_t *cmd = shell_find_cmd(argv[0]);
+  if (!cmd) {
+    u_printf("unknown command: %s\n", argv[0]);
+    return;
+  }
+
+  /* 必须在 shell 线程执行的命令（包括 exit / ps / jobs / kill 等） */
+  if (cmd->run_in_shell) {
+    cmd->fn(argc, argv);
+    return;
+  }
+
+  /* 其他命令全部扔给子线程执行 */
+  int status = shell_run_command(raw_line);
+  (void)status;
+  // 有需要的话可以在这里根据 status 做额外处理/打印
+}
+
 static void shell_main_loop(void)
 {
   char line[SHELL_MAX_LINE];
-  char *argv[SHELL_MAX_ARGS];
 
   u_puts("tiny shell started. type 'help' for commands.");
 
   for (;;) {
-    /* 提示符（不自动换行） */
     u_printf("> ");
 
-    int len = u_gets(line, sizeof(line));
-    if (len < 0) {
-      u_puts("read error");
+    int r = shell_read_line(line, sizeof(line));
+    if (r == SHELL_READ_INTR) {
+      // Ctrl-C：终止当前行，重新给提示符
       continue;
     }
-    if (len == 0) {
-      /* EOF 或空行，简单跳过 */
+    if (r == SHELL_READ_ERR) {
+      u_puts("shell: read error");
       continue;
     }
-
-    int argc = shell_parse_line(line, argv, SHELL_MAX_ARGS);
-    if (argc == 0) {
-      continue;
-    }
-
-    const shell_cmd_t *cmd = shell_find_cmd(argv[0]);
-    if (!cmd) {
-      u_printf("unknown command: %s\n", argv[0]);
+    if (r == SHELL_READ_EOF) {
+      // 可以选择退出 shell 或简单忽略
+      // 这里简单忽略
       continue;
     }
 
-    /* v0：命令在 shell 线程里前台执行，不做后台 job */
-    cmd->fn(argc, argv);
+    shell_dispatch_line(line);
   }
 }
 

@@ -4,9 +4,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FD_STDIN  0
-#define FD_STDOUT 1
-#define FD_STDERR 2
+#define FD_STDIN    0
+#define FD_STDOUT   1
+#define FD_STDERR   2
+
+#define U_GETS_INTR (-2) /* 当前行被 Ctrl-C 中断 */
 
 /* ===== memory ===== */
 
