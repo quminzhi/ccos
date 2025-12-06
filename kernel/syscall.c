@@ -47,10 +47,7 @@ void thread_exit(int exit_code)
 
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : : "memory");
 
-  /* 理论上不会回来；保险起见，spin 一下 */
-  while (1) {
-    __asm__ volatile("nop");
-  }
+  __builtin_unreachable();
 }
 
 /* 用户侧 thread_join：阻塞直到 tid 退出 */

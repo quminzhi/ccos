@@ -29,7 +29,7 @@ uint64_t read(int fd, void *buf, uint64_t len);
  */
 int thread_join(tid_t tid, int *status_out);
 tid_t thread_create(thread_entry_t entry, void *arg, const char *name);
-void thread_exit(int exit_code);
+void thread_exit(int exit_code) __attribute__((noreturn));
 void thread_sleep(uint64_t ticks);
 
 #endif  // SYSCALL_H

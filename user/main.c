@@ -40,8 +40,6 @@ static void thread_worker(void *arg)
 
   /* 把 n 当作 exit_code 传回去，方便主线程在 join 后查看 */
   thread_exit(n);
-
-  __builtin_unreachable();
 }
 
 static void console_worker(void *arg)
@@ -80,7 +78,6 @@ static void console_worker(void *arg)
   //   write(FD_STDOUT, buf, (uint64_t)n);
   // }
   thread_exit(0);
-  __builtin_unreachable();
 }
 
 void user_main(void *arg)
