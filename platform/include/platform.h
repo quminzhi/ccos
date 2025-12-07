@@ -19,17 +19,18 @@ void platform_put_hex64(uint64_t x);
 void platform_put_dec_s(int64_t v);
 void platform_put_dec_us(uint64_t x);
 
-/* 让 CPU idle，一般就是 wfi */
+/* goldfish_rtc */
+void platform_rtc_init(void);
+uint64_t platform_rtc_read_ns(void);
+void platform_rtc_set_alarm_after(uint64_t delay_ns);
+
 void platform_idle(void);
 
 /* 当前时间：读取 time CSR */
 platform_time_t platform_time_now(void);
-
-/* 安排下一次定时器中断：当前时间 + delta_ticks */
 void platform_timer_start_after(platform_time_t delta_ticks);
-
-/* 直接按绝对时间设置定时器（stime_value = time CSR 的刻度） */
 void platform_timer_start_at(platform_time_t when);
+
 
 void platform_plic_init(void);
 void platform_handle_s_external(struct trapframe *tf);

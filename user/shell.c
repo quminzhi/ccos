@@ -169,6 +169,7 @@ static void cmd_sleep(int argc, char **argv);
 static void cmd_ps(int argc, char **argv);
 static void cmd_jobs(int argc, char **argv);
 static void cmd_kill(int argc, char **argv);
+static void cmd_date(int argc, char **argv);
 
 /* 命令表 */
 static const shell_cmd_t g_shell_cmds[] = {
@@ -178,6 +179,7 @@ static const shell_cmd_t g_shell_cmds[] = {
     {"ps",    cmd_ps,    "list threads",                 1},
     {"jobs",  cmd_jobs,  "list user threads",            1},
     {"kill",  cmd_kill,  "kill <tid>",                   1},
+    {"date",  cmd_date,  "date",                         0},
     {"exit",  cmd_exit,  "exit shell",                   1},
 };
 
@@ -327,6 +329,22 @@ static void cmd_kill(int argc, char **argv)
   } else {
     u_printf("kill: sent SIGKILL to tid=%d\n", tid);
   }
+}
+
+static void cmd_date(int argc, char **argv)
+{
+  (void)argc;
+  (void)argv;
+
+  struct timespec ts;
+  int ret = clock_gettime(CLOCK_REALTIME, &ts);
+  if (ret < 0) {
+    u_printf("date: clock_gettime failed (%d)\n", ret);
+  }
+
+  // 目前 RTC 没有对齐到真实世界时间，就先简单打一个秒+纳秒
+  u_printf("time: %llu.%09u seconds since boot\n",
+           (unsigned long long)ts.tv_sec, (unsigned)ts.tv_nsec);
 }
 
 /* -------------------------------------------------------------------------- */

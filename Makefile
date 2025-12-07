@@ -157,8 +157,15 @@ endif
 # QEMU 运行配置
 # ---------------------------------------------------------------------------
 
+DTB := $(OUT_DIR)/virt.dtb
+DTS := $(OUT_DIR)/virt.dts
+
+QEMU_MACHINE         ?= virt
+QEMU_MACHINE_EXTRAS  ?=
+QEMU_COMMON_OPTS     ?= -nographic -bios default -m 128M
+
 QEMU      ?= qemu-system-riscv64
-QEMU_OPTS ?= -machine virt -nographic -bios default -m 128M
+QEMU_OPTS = -machine $(QEMU_MACHINE)$(QEMU_MACHINE_EXTRAS) $(QEMU_COMMON_OPTS)
 
 QEMU_GDB_PORT ?= 1234
 
@@ -170,7 +177,7 @@ QEMU_GDB_PORT ?= 1234
 
 all: build
 
-build: $(TARGET) disasm-all symbols objdump-objs size
+build: $(TARGET) $(DTS) disasm-all symbols objdump-objs size
 
 # 链接规则：注意先保证目录存在
 $(TARGET): $(OBJS)
@@ -239,7 +246,7 @@ $(DUMP_DIR)/%.objdump: $(OBJ_DIR)/%.o
 # ---------------------------------------------------------------------------
 
 # 启动 QEMU + OpenSBI，在 S 模式运行内核
-qemu: $(TARGET) 
+qemu: $(TARGET) $(DTS)
 	@echo "  QEMU  $(TARGET)"
 	$(QEMU) $(QEMU_OPTS) -kernel $(TARGET)
 
@@ -252,6 +259,16 @@ qemu-dbg: $(TARGET)
 gdb: $(TARGET)
 	@echo "  GDB   $(TARGET) (target remote :$(QEMU_GDB_PORT))"
 	$(GDB) $(TARGET) -ex "target remote :$(QEMU_GDB_PORT)"
+
+$(DTS): $(DTB)
+	dtc -I dtb -O dts $< > $@
+
+$(DTB):
+	mkdir -p $(OUT_DIR)
+	$(QEMU) \
+		-machine virt,dumpdtb=$@ \
+		-nographic -S
+
 
 # ---------------------------------------------------------------------------
 # 调试：打印当前参与构建的源文件

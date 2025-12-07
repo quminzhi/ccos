@@ -6,6 +6,7 @@
 #include "trap.h"
 #include "arch.h"
 #include "thread.h"
+#include "time.h"
 
 void user_main(void *arg) __attribute__((noreturn));
 
@@ -21,21 +22,23 @@ void main(long hartid, long dtb_pa)
   platform_puts("Booting...\n");
 
   platform_uart_init();
-  console_init();  // console layer on uart
-  log_init_baremetal();
-
+  platform_rtc_init();
   trap_init();
   platform_plic_init();
 
-  arch_enable_timer_interrupts();
+  console_init();  // console layer on uart
+  log_init_baremetal();
+
+  time_init();
   threads_init();
 
   /* 启动第一次定时器 */
+  arch_enable_timer_interrupts();
   platform_timer_start_after(DELTA_TICKS);
 
-  pr_info("system init done, starting user main...");
+  // platform_rtc_set_alarm_after(3ULL * 1000 * 1000 * 1000);
 
-  /* exec user main */
+  pr_info("system init done, starting user main...");
   threads_exec(user_main, NULL);
 
   for (;;) {

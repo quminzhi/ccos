@@ -81,7 +81,7 @@ void uart16550_put_hex64(uint64_t x)
   }
 }
 
-void uart16550_irq(void)
+void uart16550_irq_handler(void)
 {
   // 简单版：把所有收到的字节丢给一个 console 输入处理函数
   while (uart_lsr_read() & UART_LSR_DR) {

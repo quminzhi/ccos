@@ -95,3 +95,15 @@ int thread_kill(tid_t tid)
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : : "memory");
   return (int)a0;
 }
+
+int clock_gettime(int clock_id, struct timespec *ts)
+{
+  register uintptr_t a0 asm("a0") = SYS_CLOCK_GETTIME;  // syscall 号
+  register uintptr_t a1 asm("a1") = (uintptr_t)clock_id;
+  register uintptr_t a2 asm("a2") = (uintptr_t)ts;
+
+  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
+
+  // 约定：a0 返回 0 表示成功，<0 表示错误
+  return (int)a0;
+}

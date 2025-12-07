@@ -1,6 +1,7 @@
 // kernel/trap.c
 
 #include <stdint.h>
+#include <time.h>
 #include "riscv_csr.h"
 #include "platform.h"
 #include "trap.h"
@@ -155,6 +156,10 @@ static uintptr_t syscall_handler(struct trapframe *tf)
       } else {
         // block and this is another thread!
       }
+      break;
+    case SYS_CLOCK_GETTIME:
+      ADVANCE_SEPC();
+      tf->a0 = sys_clock_gettime((int)tf->a1, (struct timespec *)tf->a2);
       break;
     default:
       ADVANCE_SEPC();

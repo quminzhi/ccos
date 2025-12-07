@@ -1,9 +1,12 @@
 #ifndef SYSCALL_H
 #define SYSCALL_H
 
+// user side
+
 #include <stdint.h>
 #include <stddef.h>
 #include "thread_sys.h"
+#include "time_sys.h"
 
 #define FD_STDIN  0
 #define FD_STDOUT 1
@@ -17,7 +20,8 @@ enum {
   SYS_WRITE         = 5,
   SYS_READ          = 6,
   SYS_THREAD_LIST   = 7,
-  SYS_THREAD_KILL   = 8
+  SYS_THREAD_KILL   = 8,
+  SYS_CLOCK_GETTIME = 9
 };
 
 uint64_t write(int fd, const void *buf, uint64_t len);
@@ -36,5 +40,8 @@ void thread_exit(int exit_code) __attribute__((noreturn));
 
 int thread_list(struct u_thread_info *buf, int max);  // 返回实际个数 / 负错误码
 int thread_kill(tid_t tid);                           // 0=OK, <0=错误
+
+// clock_id support CLOCK_REALTIME(0) only
+int clock_gettime(int clock_id, struct timespec *ts);
 
 #endif  // SYSCALL_H

@@ -15,6 +15,7 @@
 
 /* UART0 外部中断号 */
 #define PLIC_IRQ_UART0        10U
+#define PLIC_IRQ_RTC          11U
 
 void plic_init_s_mode(void);
 void plic_set_priority(uint32_t irq, uint32_t prio);

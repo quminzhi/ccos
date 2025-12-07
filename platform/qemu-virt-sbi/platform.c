@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include "riscv_csr.h"
 #include "uart_16550.h"
+#include "goldfish_rtc.h"
 #include "platform.h"
 #include "plic.h"
 #include "sbi.h"
@@ -108,6 +109,17 @@ void platform_timer_start_after(platform_time_t delta_ticks)
   platform_timer_start_at(now + delta_ticks);
 }
 
+/* ========== RTC ========== */
+
+void platform_rtc_init(void) { goldfish_rtc_init(); }
+
+uint64_t platform_rtc_read_ns(void) { return goldfish_rtc_read_ns(); }
+
+void platform_rtc_set_alarm_after(uint64_t delay_ns)
+{
+  goldfish_rtc_set_alarm_after(delay_ns);
+}
+
 /* ========== PLIC ========== */
 
 void platform_plic_init(void)
@@ -115,9 +127,12 @@ void platform_plic_init(void)
   // 1. S-mode PLIC context
   plic_init_s_mode();
 
-  // 2. 开 UART0 中断
+  // 2. 开 UART0 RTC 中断
   plic_set_priority(PLIC_IRQ_UART0, 1);
   plic_enable_irq(PLIC_IRQ_UART0);
+
+  plic_set_priority(PLIC_IRQ_RTC, 1);
+  plic_enable_irq(PLIC_IRQ_RTC);
 
   // 3. S-mode 打开外部中断
   csr_set(sie, SIE_SEIE);
@@ -135,7 +150,10 @@ void platform_handle_s_external(struct trapframe* tf)
 
   switch (irq) {
     case PLIC_IRQ_UART0:
-      uart16550_irq();
+      uart16550_irq_handler();
+      break;
+    case PLIC_IRQ_RTC:
+      goldfish_rtc_irq_handler();
       break;
     default:
       // 临时：可以打个 log 看看
