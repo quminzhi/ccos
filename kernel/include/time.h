@@ -10,3 +10,5 @@ struct k_timespec {
 void time_init(void);
 uint64_t ktime_get_real_ns(void);
 void ktime_get_real_ts(struct k_timespec *ts);
+uint64_t ktime_get_monotonic_ns(void);
+void ktime_get_monotonic_ts(struct k_timespec *ts);

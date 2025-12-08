@@ -6,7 +6,7 @@
 
 extern tid_t g_stdin_waiter;
 
-uint64_t sys_write(int fd, const char *buf, uint64_t len)
+uint64_t sys_write(int fd, const char* buf, uint64_t len)
 {
   if (len == 0) return 0;
 
@@ -21,8 +21,8 @@ uint64_t sys_write(int fd, const char *buf, uint64_t len)
   }
 }
 
-uint64_t sys_read(int fd, char *buf, uint64_t len, struct trapframe *tf,
-                  int *is_non_block_read)
+uint64_t sys_read(int fd, char* buf, uint64_t len, struct trapframe* tf,
+                  int* is_non_block_read)
 {
   if (fd != FD_STDIN) {
     // support stdin only
@@ -47,8 +47,8 @@ uint64_t sys_read(int fd, char *buf, uint64_t len, struct trapframe *tf,
   return 0;
 }
 
-static int copy_to_user_timespec(struct timespec *u_ts,
-                                 const struct k_timespec *k_ts)
+static int copy_to_user_timespec(struct timespec* u_ts,
+                                 const struct k_timespec* k_ts)
 {
   if (!u_ts) return -1;
   u_ts->tv_sec  = k_ts->tv_sec;
@@ -56,18 +56,23 @@ static int copy_to_user_timespec(struct timespec *u_ts,
   return 0;
 }
 
-long sys_clock_gettime(int clock_id, struct timespec *u_ts)
+long sys_clock_gettime(int clock_id, struct timespec* u_ts)
 {
-  if (clock_id != CLOCK_REALTIME) {
-    return -1;
-  }
-
   struct k_timespec kt;
-  ktime_get_real_ts(&kt);
 
-  if (copy_to_user_timespec(u_ts, &kt) != 0) {
-    return -1;
+  switch (clock_id) {
+    case CLOCK_REALTIME:
+      ktime_get_real_ts(&kt);
+      break;
+    case CLOCK_MONOTONIC:
+      ktime_get_monotonic_ts(&kt);
+      break;
+    default:
+      return -1;
   }
+
+  if (copy_to_user_timespec(u_ts, &kt) != 0)
+    return -1;
 
   return 0;
 }
