@@ -9,6 +9,12 @@
 #include "plic.h"
 #include "sbi.h"
 
+static const void* g_dtb;  // 全局 DTB 指针
+
+const void* platform_get_dtb(void) { return g_dtb; }
+
+void platform_set_dtb(uintptr_t dtb_pa) { g_dtb = (const void*)dtb_pa; }
+
 /* ========== 输出相关 ========== */
 
 void platform_uart_init() { uart16550_init(); }
@@ -139,6 +145,19 @@ void platform_plic_init(void)
   csr_set(sstatus, SSTATUS_SIE);
 }
 
+/* ========== IRQ handler 注册表 ========== */
+
+#define MAX_IRQ 64  // QEMU virt 上基本够用，后面不够再扩
+typedef void (*irq_handler_t)(void);
+static irq_handler_t s_irq_table[MAX_IRQ];
+
+void platform_register_irq_handler(uint32_t irq, irq_handler_t handler)
+{
+  if (irq < MAX_IRQ) {
+    s_irq_table[irq] = handler;
+  }
+}
+
 void platform_handle_s_external(struct trapframe* tf)
 {
   (void)tf;  // 暂时用不到
@@ -148,17 +167,15 @@ void platform_handle_s_external(struct trapframe* tf)
     return;  // spurious
   }
 
-  switch (irq) {
-    case PLIC_IRQ_UART0:
-      uart16550_irq_handler();
-      break;
-    case PLIC_IRQ_RTC:
-      goldfish_rtc_irq_handler();
-      break;
-    default:
-      // 临时：可以打个 log 看看
-      platform_puts("unknown PLIC irq\n");
-      break;
+  irq_handler_t h = NULL;
+  if (irq < MAX_IRQ) {
+    h = s_irq_table[irq];
+  }
+
+  if (h) {
+    h();
+  } else {
+    platform_puts("unknown PLIC irq\n");
   }
 
   plic_complete(irq);

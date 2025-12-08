@@ -63,6 +63,7 @@ PLATFORM_DIR := platform/$(PLATFORM)
 KERNEL_DIR   := kernel
 USER_DIR     := user
 LIB_DIR      := lib
+LIBFDT_DIR   := lib/libfdt
 CONFIG_DIR   := config
 
 ARCH_SRCS     := $(shell find $(ARCH_DIR)     -name '*.c' -o -name '*.S')
@@ -88,7 +89,8 @@ INCLUDE_DIRS := \
   -I$(ARCH_DIR)/include \
   -Iplatform/include \
   -I$(KERNEL_DIR)/include \
-  -I$(LIB_DIR)/include
+  -I$(LIB_DIR)/include \
+	-I$(LIBFDT_DIR)
 
 # ---------------------------------------------------------------------------
 # 编译 / 链接选项

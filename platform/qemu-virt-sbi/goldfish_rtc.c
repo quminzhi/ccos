@@ -2,10 +2,8 @@
 #include "goldfish_rtc.h"
 #include <stdint.h>
 #include "platform.h"
-#include "plic.h"   // 建议在这里直接开 PLIC irq
-
-// QEMU virt.dts 里的地址：reg = <0x0 0x00101000 0x0 0x00001000>
-#define QEMU_VIRT_RTC_BASE  0x00101000UL
+#include "plic.h"  // 建议在这里直接开 PLIC irq
+#include "fdt_helper.h"
 
 // 寄存器偏移
 #define RTC_TIME_LOW        0x00
@@ -17,25 +15,45 @@
 #define RTC_ALARM_STATUS    0x18
 #define RTC_CLEAR_INTERRUPT 0x1c
 
-// PLIC 里的 IRQ 号：virt.dts 里 rtc@101000 的 interrupts = <11>;
-#define QEMU_VIRT_RTC_IRQ   11
+// 硬编码版本：
+// // QEMU virt.dts 里的地址：reg = <0x0 0x00101000 0x0 0x00001000>
+// #define QEMU_VIRT_RTC_BASE  0x00101000UL
+// // PLIC 里的 IRQ 号：virt.dts 里 rtc@101000 的 interrupts = <11>;
+// #define QEMU_VIRT_RTC_IRQ   11
+// static volatile uint32_t *rtc_base = (volatile uint32_t *)QEMU_VIRT_RTC_BASE;
 
-static volatile uint32_t *rtc_base = (volatile uint32_t *)QEMU_VIRT_RTC_BASE;
+static volatile uint32_t *rtc_base;
+static uint32_t rtc_irq;
 
-static inline uint32_t rtc_r32(uint32_t off)
-{
-  return rtc_base[off / 4];
-}
+static inline uint32_t rtc_r32(uint32_t off) { return rtc_base[off / 4]; }
 
 static inline void rtc_w32(uint32_t off, uint32_t val)
 {
   rtc_base[off / 4] = val;
 }
 
+uint32_t goldfish_rtc_get_irq(void) {
+  return rtc_irq;
+}
+
 void goldfish_rtc_init(void)
 {
-  // 简单做法：假设物理地址在 S 态直接可访问
-  // 如果你启了分页，把这段 MMIO 映射到相应 VA，再改 rtc_base。
+  const void *fdt = platform_get_dtb();
+  uint64_t base, size;
+  uint32_t irq;
+
+  if (fdt_find_reg_by_compat(fdt, "google,goldfish-rtc", &base, &size) < 0) {
+    platform_puts("goldfish_rtc_init: no goldfish-rtc in fdt\n");
+    return;
+  }
+
+  if (fdt_find_irq_by_compat(fdt, "google,goldfish-rtc", &irq) < 0) {
+    platform_puts("goldfish_rtc_init: no interrupts for goldfish-rtc\n");
+    return;
+  }
+
+  rtc_base = (volatile uint32_t *)(uintptr_t)base; // 暂时物理=虚拟
+  rtc_irq  = irq;
 
   // 清一下可能遗留的状态
   rtc_w32(RTC_CLEAR_ALARM, 1);
@@ -43,6 +61,9 @@ void goldfish_rtc_init(void)
 
   // 先默认不开中断，等真正设置闹钟的时候再 enable
   rtc_w32(RTC_IRQ_ENABLED, 0);
+
+  // 注册 handler
+  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler);
 }
 
 uint64_t goldfish_rtc_read_ns(void)
@@ -58,8 +79,8 @@ void goldfish_rtc_set_alarm_after(uint64_t delay_ns)
   uint64_t now  = goldfish_rtc_read_ns();
   uint64_t when = now + delay_ns;
 
-  uint32_t lo = (uint32_t)(when & 0xffffffffu);
-  uint32_t hi = (uint32_t)(when >> 32);
+  uint32_t lo   = (uint32_t)(when & 0xffffffffu);
+  uint32_t hi   = (uint32_t)(when >> 32);
 
   /*
    * ⚠️ 注意顺序：QEMU 代码里是：
@@ -70,7 +91,7 @@ void goldfish_rtc_set_alarm_after(uint64_t delay_ns)
    * 才是完整的 64bit 值。
    */
   rtc_w32(RTC_ALARM_HIGH, hi);
-  rtc_w32(RTC_ALARM_LOW, lo);        // 这一步才真正 arm timer
+  rtc_w32(RTC_ALARM_LOW, lo);  // 这一步才真正 arm timer
 
   // 打开 IRQ，让 irq_pending 生效
   rtc_w32(RTC_IRQ_ENABLED, 1);

@@ -9,7 +9,7 @@
 #include "riscv_csr.h"
 
 extern tid_t g_stdin_waiter;
-void *memset(void *s, int c, size_t n); /* klib.h */
+void *memset(void *s, int c, size_t n); /* string.h */
 void arch_first_switch(struct trapframe *tf);
 
 /* -------------------------------------------------------------------------- */

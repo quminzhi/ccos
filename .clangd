@@ -1,0 +1,7 @@
+CompileFlags:
+  Add:
+    - -Ilib
+    - -Ilib/libfdt
+    - -std=gnu11
+    - -nostdlib
+    - -ffreestanding

@@ -4,6 +4,8 @@
 
 void goldfish_rtc_init(void);
 
+uint32_t goldfish_rtc_get_irq(void);
+
 // 读 RTC 的 64bit 时间戳 (ns)
 uint64_t goldfish_rtc_read_ns(void);
 

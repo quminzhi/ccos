@@ -33,4 +33,4 @@ _start:
     *        a0 = hartid, a1 = dtb 物理地址
     *        直接 tail 进入 kernel_main(hartid, dtb_pa)
     */
-    tail     main
+    tail     kernel_main
