@@ -13,9 +13,9 @@
 #define PLIC_STHRESHOLD_HART0 (PLIC_BASE + 0x201000)
 #define PLIC_SCLAIM_HART0     (PLIC_BASE + 0x201004)
 
-/* UART0 外部中断号 */
-#define PLIC_IRQ_UART0        10U
-#define PLIC_IRQ_RTC          11U
+// 通过fdt读取dtb获取
+// #define PLIC_IRQ_UART0        10U
+// #define PLIC_IRQ_RTC          11U
 
 void plic_init_s_mode(void);
 void plic_set_priority(uint32_t irq, uint32_t prio);

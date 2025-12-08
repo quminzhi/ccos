@@ -15,6 +15,7 @@ void uart16550_write(const char *buf, size_t len);
 void uart16550_puts(const char *s);
 void uart16550_put_hex64(uint64_t x);
 
+uint32_t uart16550_get_irq(void);
 void uart16550_irq_handler(void);
 
 #endif //BAREMETAL_UART_16550_H

@@ -1,12 +1,20 @@
 // platform/qemu-virt-sbi/uart_16550.c
 #include "uart_16550.h"
+#include "platform.h"
 #include <stdint.h>
+#include "fdt_helper.h"
 
-#define UART0_BASE     0x10000000UL
-#define UART0_RBR      (UART0_BASE + 0)  // Receiver Buffer Register (read)
-#define UART0_THR      (UART0_BASE + 0)  // Transmit Holding Register (write)
-#define UART0_IER      (UART0_BASE + 1)  // Interrupt Enable Register
-#define UART0_LSR      (UART0_BASE + 5)  // Line Status Register
+static volatile uint8_t *uart_base;
+static uint32_t uart_irq;
+
+static inline void uart_w(uint32_t off, uint8_t v) { uart_base[off] = v; }
+static inline uint8_t uart_r(uint32_t off) { return uart_base[off]; }
+
+// #define UART0_BASE     0x10000000UL
+#define UART_RBR       0u  // Receiver Buffer Register
+#define UART_THR       0u  // Transmit Holding Register
+#define UART_IER       1u  // Interrupt Enable Register
+#define UART_LSR       5u  // Line Status Register
 
 #define UART_LSR_DR    0x01  // Data Ready
 #define UART_LSR_THRE  0x20  // Transmitter Holding Register Empty
@@ -14,34 +22,44 @@
 
 extern void console_on_char_from_irq(uint8_t ch);
 
-static inline uint8_t uart_lsr_read(void)
-{
-  volatile uint8_t *lsr = (volatile uint8_t *)UART0_LSR;
-  return *lsr;
-}
+static inline uint8_t uart_lsr_read(void) { return uart_r(UART_LSR); }
+static inline void uart_thr_write(uint8_t v) { uart_w(UART_THR, v); }
+static inline uint8_t uart_rbr_read(void) { return uart_r(UART_RBR); }
+static inline void uart_ier_write(uint8_t v) { uart_w(UART_IER, v); }
 
-static inline void uart_thr_write(uint8_t v)
-{
-  volatile uint8_t *thr = (volatile uint8_t *)UART0_THR;
-  *thr                  = v;
-}
-
-static inline uint8_t uart_rbr_read(void)
-{
-  volatile uint8_t *rbr = (volatile uint8_t *)UART0_RBR;
-  return *rbr;
-}
-
-static inline void uart_ier_write(uint8_t v)
-{
-  volatile uint8_t *ier = (volatile uint8_t *)UART0_IER;
-  *ier                  = v;
-}
+uint32_t uart16550_get_irq(void) { return uart_irq; }
 
 void uart16550_init(void)
 {
+  const void *fdt = platform_get_dtb();
+  uint64_t base, size;
+  uint32_t irq;
+
+  if (fdt_find_reg_by_compat(fdt, "ns16550a", &base, &size) < 0) {
+    platform_puts("uart16550_init: no ns16550a reg in fdt\n");
+    return;
+  }
+
+  if (fdt_find_irq_by_compat(fdt, "ns16550a", &irq) < 0) {
+    platform_puts("uart16550_init: no ns16550a interrupts in fdt\n");
+    return;
+  }
+
+  uart_base = (volatile uint8_t *)(uintptr_t)base;
+  uart_irq  = irq;
+
   // baud rate setting or others
   uart_ier_write(UART_IER_ERBFI);
+
+  platform_register_irq_handler(uart_irq, uart16550_irq_handler);
+}
+
+void uart16550_irq_handler(void)
+{
+  while (uart_lsr_read() & UART_LSR_DR) {
+    uint8_t ch = uart_rbr_read();
+    console_on_char_from_irq(ch);
+  }
 }
 
 void uart16550_putc(char c)
@@ -78,14 +96,5 @@ void uart16550_put_hex64(uint64_t x)
     uint8_t nib = (x >> i) & 0xF;
     char c      = (nib < 10) ? ('0' + nib) : ('a' + (nib - 10));
     uart16550_putc(c);
-  }
-}
-
-void uart16550_irq_handler(void)
-{
-  // 简单版：把所有收到的字节丢给一个 console 输入处理函数
-  while (uart_lsr_read() & UART_LSR_DR) {
-    uint8_t ch = uart_rbr_read();
-    console_on_char_from_irq(ch);
   }
 }

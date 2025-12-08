@@ -1,6 +1,5 @@
 // fdt_helper.c
 #include "fdt_helper.h"
-#include "platform.h"
 #include "libfdt.h"
 
 int fdt_find_reg_by_compat(const void *fdt, const char *compat, uint64_t *base,

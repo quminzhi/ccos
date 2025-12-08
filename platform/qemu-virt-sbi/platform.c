@@ -126,7 +126,7 @@ void platform_rtc_set_alarm_after(uint64_t delay_ns)
   goldfish_rtc_set_alarm_after(delay_ns);
 }
 
-/* ========== PLIC ========== */
+/* ========== PLIC & IRQ ========== */
 
 void platform_plic_init(void)
 {
@@ -134,11 +134,13 @@ void platform_plic_init(void)
   plic_init_s_mode();
 
   // 2. 开 UART0 RTC 中断
-  plic_set_priority(PLIC_IRQ_UART0, 1);
-  plic_enable_irq(PLIC_IRQ_UART0);
+  uint32_t uart_irq = uart16550_get_irq();
+  plic_set_priority(uart_irq, 1);
+  plic_enable_irq(uart_irq);
 
-  plic_set_priority(PLIC_IRQ_RTC, 1);
-  plic_enable_irq(PLIC_IRQ_RTC);
+  uint32_t rtc_irq = goldfish_rtc_get_irq();
+  plic_set_priority(rtc_irq, 1);
+  plic_enable_irq(rtc_irq);
 
   // 3. S-mode 打开外部中断
   csr_set(sie, SIE_SEIE);

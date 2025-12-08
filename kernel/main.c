@@ -18,11 +18,12 @@ void kernel_main(long hartid, long dtb_pa)
 {
   (void)hartid;
 
+  platform_set_dtb(dtb_pa);
+  platform_uart_init();
+
+  // platform_puts => uart (must initialized before)
   platform_puts("Booting...\n");
 
-  platform_set_dtb(dtb_pa);
-
-  platform_uart_init();
   platform_rtc_init();
   trap_init();
   platform_plic_init();
@@ -40,7 +41,7 @@ void kernel_main(long hartid, long dtb_pa)
   platform_rtc_set_alarm_after(3ULL * 1000 * 1000 * 1000);
 
   pr_info("system init done, starting user main...");
-  // threads_exec(user_main, NULL);
+  threads_exec(user_main, NULL);
 
   for (;;) {
     __asm__ volatile("wfi");

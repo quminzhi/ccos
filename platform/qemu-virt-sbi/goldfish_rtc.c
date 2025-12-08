@@ -2,7 +2,6 @@
 #include "goldfish_rtc.h"
 #include <stdint.h>
 #include "platform.h"
-#include "plic.h"  // 建议在这里直接开 PLIC irq
 #include "fdt_helper.h"
 
 // 寄存器偏移
