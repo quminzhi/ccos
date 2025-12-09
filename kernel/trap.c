@@ -10,6 +10,7 @@
 #include "log.h"
 #include "panic.h"
 #include "sysfile.h"
+#include "spinlock.h"
 
 #ifndef NDEBUG
 extern void print_thread_prefix(void);
@@ -40,12 +41,20 @@ void trap_init(void)
 
 static void timer_handler(struct trapframe *tf)
 {
-  threads_tick();
+  /* 1 tick = 一个调度周期 */
+  threads_tick();  // 可能把当前线程标记为 SLEEP / RUNNABLE 等
+
+  /* 重新 armed 下一次时钟中断 */
   platform_timer_start_after(DELTA_TICKS);
+
+  /* 根据当前 tf 和线程状态做一次调度：
+   * - 如果没切走，tf 是当前线程的上下文
+   * - 如果 schedule() 切到别的线程，就会覆盖 *tf，包括 tf->sepc
+   */
   schedule(tf);
 }
 
-static uintptr_t breakpoint_handler(struct trapframe *tf)
+static void breakpoint_handler(struct trapframe *tf)
 {
   const reg_t scause    = tf->scause;
   const uintptr_t sepc  = tf->sepc;
@@ -67,70 +76,66 @@ static uintptr_t breakpoint_handler(struct trapframe *tf)
            (unsigned long)sepc);
   pr_debug("  scause=0x%016lx stval=0x%016lx sstatus=0x%016lx",
            (unsigned long)scause, (unsigned long)stval, (unsigned long)sstatus);
+
   dump_backtrace_from_tf(tf, thread_current());
 
   if (!from_kernel) {
     /* 用户态 ebreak：类似 SIGTRAP
      * 策略：跳过 ebreak，然后把当前线程干掉，避免用户态死循环。
      */
-    ADVANCE_SEPC();           // tf->sepc = sepc + 4;
-    thread_sys_exit(tf, -1);  // 不一定会返回
-    return tf->sepc;
+    tf->sepc = sepc + 4;
+    thread_sys_exit(tf, -1);  // 不一定会返回（内部可能 schedule）
+    return;
   }
 
   /* 内核态 ebreak：大多数就是你写的 BREAK_IF()
    * Debug 下默认策略：打印一堆信息，然后跳过 ebreak 继续执行。
-   * 这样你在串口 log 里可以看到 EXACT 哪个 PC 触发了 BREAK_IF。
    */
-  ADVANCE_SEPC();
-  return tf->sepc;
+  tf->sepc = sepc + 4;
+  return;
 
-#else  /* NDEBUG */
+#else /* NDEBUG */
+
   /* -------- Release 版本：出现在这里就是严重 bug -------- */
   dump_trap(tf);
   panic("EXC_BREAKPOINT in release build");
   // NOT REACHED
-  return tf->sepc;
+
 #endif /* NDEBUG */
 }
 
-static uintptr_t syscall_handler(struct trapframe *tf)
+static void syscall_handler(struct trapframe *tf)
 {
   const uintptr_t sys_id = tf->a0;
-  const uintptr_t sepc   = tf->sepc;
 
   uint64_t nwrite, nread;
 
+  tf->sepc += 4;
+
   switch (sys_id) {
     case SYS_SLEEP:
-      ADVANCE_SEPC();
       thread_sys_sleep(tf, tf->a1);
-      // 这里可能会 schedule，所以一定要在上面先改 sepc
+      // 里面可能 schedule()
       break;
     case SYS_THREAD_EXIT:
-      ADVANCE_SEPC();
       thread_sys_exit(tf, (int)tf->a1);
-      // 实际不会回到调用点
+      // 通常不会“回到这个线程”的 trap_return
       break;
     case SYS_THREAD_JOIN:
-      ADVANCE_SEPC();
       thread_sys_join(tf, (tid_t)tf->a1, tf->a2);
-      // 如果 join 阻塞，schedule 会切到别的线程
+      // 阻塞情况下，thread_sys_join 内部会调用 schedule()
       break;
     case SYS_THREAD_CREATE:
-      ADVANCE_SEPC();
       thread_sys_create(tf, (thread_entry_t)tf->a1, (void *)tf->a2,
                         (const char *)tf->a3);
       break;
     case SYS_THREAD_KILL: {
-      ADVANCE_SEPC();
       tid_t tid = (tid_t)tf->a1;
       thread_sys_kill(tf, tid);
       /* 返回值已经在 thread_sys_kill 里写入 tf->a0 了 */
       break;
     }
     case SYS_THREAD_LIST: {
-      ADVANCE_SEPC();
       struct u_thread_info *ubuf = (struct u_thread_info *)tf->a1;
       int max                    = (int)tf->a2;
       int n                      = thread_sys_list(ubuf, max);
@@ -138,118 +143,121 @@ static uintptr_t syscall_handler(struct trapframe *tf)
       break;
     }
     case SYS_WRITE:
-      ADVANCE_SEPC();
       nwrite = sys_write((int)tf->a1, (const char *)tf->a2, (uint64_t)tf->a3);
       tf->a0 = nwrite;
       break;
-    case SYS_READ:
-      ADVANCE_SEPC();
+    case SYS_READ: {
       int is_non_block_read = 0;
       nread = sys_read((int)tf->a1, (char *)tf->a2, (uint64_t)tf->a3, tf,
                        &is_non_block_read);
       if (is_non_block_read) {
         tf->a0 = nread;
       } else {
-        // block and this is another thread!
+        /* 阻塞 read：
+         * - sys_read 应该已经把当前线程挂到等待队列并 schedule()
+         * - 被唤醒时，唤醒方会写回 t->tf.a0（你在 thread.c 里已经这么做了）
+         */
       }
       break;
+    }
     case SYS_CLOCK_GETTIME:
-      ADVANCE_SEPC();
       tf->a0 = sys_clock_gettime((int)tf->a1, (struct timespec *)tf->a2);
       break;
     case SYS_IRQ_GET_STATS:
-      ADVANCE_SEPC();
       tf->a0 = sys_irq_get_stats((struct irqstat_user *)tf->a1, (size_t)tf->a2);
       break;
     default:
-      ADVANCE_SEPC();
       dump_trap(tf);
       panic("unknown syscall");
       break;
   }
-
-  return tf->sepc;
 }
 
 uintptr_t trap_entry_c(struct trapframe *tf)
 {
-  const reg_t scause      = tf->scause;
-  const uintptr_t sepc    = tf->sepc;
-  const uintptr_t sstatus = tf->sstatus;
+  kernel_lock();
 
-  const int is_interrupt  = scause_is_interrupt(scause);
+  const reg_t scause      = tf->scause;
+  const uintptr_t sstatus = tf->sstatus;
+  const int is_intr       = scause_is_interrupt(scause);
   const reg_t code        = scause_code(scause);
 
+  uintptr_t next_sepc;
+
 #ifndef NDEBUG
-  unsigned long old_sepc   = tf->sepc;
-  unsigned long old_s0     = tf->s0;
-  unsigned long old_scause = tf->scause;
+  // const unsigned long old_sepc   = tf->sepc;
+  // const unsigned long old_s0     = tf->s0;
+  // const unsigned long old_scause = tf->scause;
+
+  // pr_debug("trap_entry_c: ENTER sepc=0x%lx s0=0x%lx scause=0x%lx", old_sepc,
+  //          old_s0, old_scause);
+  // print_thread_prefix();
 #endif
 
   /* ---------- 1. 先处理“预期内”的中断 ---------- */
-  if (is_interrupt) {
+  if (is_intr) {
     switch (code) {
       case IRQ_TIMER_S:
         /* S-mode timer interrupt */
-        timer_handler(tf);
-        return tf->sepc;
+        timer_handler(tf);  // 可能触发 schedule()
+        goto handled;
+
       case IRQ_EXT_S:
         platform_handle_s_external(tf);
-        return tf->sepc;
+        goto handled;
 
-        // TODO: 以后有软件中断，可以继续在这里加 case
+        /* TODO: 软件中断（IPI）以后可以加在这里 */
 
       default:
-        break;
+        break;  // 落到下面的“未处理 trap”
     }
   } else {
     /* ---------- 2. 再处理“预期内”的异常（syscall 等） ---------- */
     switch (code) {
       case EXC_ENV_CALL_U:
         syscall_handler(tf);
-        return tf->sepc;
-      case EXC_BREAKPOINT: {
-        return breakpoint_handler(tf);
-      }
+        goto handled;
+
+      case EXC_BREAKPOINT:
+        breakpoint_handler(tf);  // 里面自己决定是否退出线程 / 单步
+        goto handled;
+
       case EXC_ILLEGAL_INSTR:
-        // 这里先不马上死循环，分情况处理
         platform_puts("Illegal instruction\n");
 
 #ifdef SSTATUS_SPP
         // SSTATUS_SPP == 0 表示从 U-mode trap 到 S-mode
         if ((sstatus & SSTATUS_SPP) == 0) {
-          // 示例：对用户态非法指令，终止当前线程（类似 SIGILL）
-          thread_sys_exit(tf, -1);
-          return tf->sepc;  // thread_sys_exit 内部可能 schedule
+          // 对用户态非法指令，终止当前线程（类似 SIGILL）
+          thread_sys_exit(tf, -1);  // 内部可能 schedule
+          goto handled;
         }
 #endif
         // 否则是内核态非法指令，跌到下面的“未处理 trap”
         break;
 
+        /* TODO: 其它异常 (page fault 等) 可以在这里继续加 case */
+
       default:
-        // 其它异常 (page fault 等) 可以在这里继续加 case
         break;
     }
   }
 
-#ifndef NDEBUG
-  pr_debug("trap_entry_c: ENTER sepc=0x%lx s0=0x%lx scause=0x%lx",
-           (unsigned long)old_sepc, (unsigned long)old_s0,
-           (unsigned long)old_scause);
-
-  print_thread_prefix();
-  pr_debug("trap_entry_c: LEAVE sepc=0x%lx s0=0x%lx", (unsigned long)tf->sepc,
-           (unsigned long)tf->s0);
-#endif
-
+  /* ---------- 3. 未处理的 trap：统一 dump + panic ---------- */
   dump_trap(tf);
   panic("unhandled trap");
+  /* panic 通常是 noreturn，不会走到 handled */
 
-  // NEVER GOES HERE
-  if (!is_interrupt) {
-    tf->sepc = sepc + 4;
-  }
-  return tf->sepc;
+handled:
+#ifndef NDEBUG
+  // pr_debug("trap_entry_c: LEAVE sepc=0x%lx s0=0x%lx", (unsigned
+  // long)tf->sepc,
+  //          (unsigned long)tf->s0);
+#endif
+
+  next_sepc = tf->sepc;  // “真相只有一个”：以 tf->sepc 为准
+  kernel_unlock();
+  return next_sepc;
 }
 
 /* ---------- 调试用：打印完整 trap 信息 ---------- */

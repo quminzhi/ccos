@@ -17,7 +17,7 @@ void arch_first_switch(struct trapframe *tf);
 /* -------------------------------------------------------------------------- */
 
 #if THREAD_MAX < 2
-#error "THREAD_MAX must be at least 2 (for idle + main)"
+#error "THREAD_MAX must be at least 2 (for idle + kernel main)"
 #endif
 
 #define USER_THREAD 1
