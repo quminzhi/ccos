@@ -60,9 +60,6 @@ void goldfish_rtc_init(void)
 
   // 先默认不开中断，等真正设置闹钟的时候再 enable
   rtc_w32(RTC_IRQ_ENABLED, 0);
-
-  // 注册 handler
-  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler);
 }
 
 uint64_t goldfish_rtc_read_ns(void)

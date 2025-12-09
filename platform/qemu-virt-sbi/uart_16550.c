@@ -50,8 +50,6 @@ void uart16550_init(void)
 
   // baud rate setting or others
   uart_ier_write(UART_IER_ERBFI);
-
-  platform_register_irq_handler(uart_irq, uart16550_irq_handler);
 }
 
 void uart16550_irq_handler(void)

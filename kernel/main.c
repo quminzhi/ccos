@@ -18,26 +18,20 @@ void kernel_main(long hartid, long dtb_pa)
 {
   (void)hartid;
 
-  platform_set_dtb(dtb_pa);
-  platform_uart_init();
-
-  // platform_puts => uart (must initialized before)
+  platform_init(dtb_pa);
   platform_puts("Booting...\n");
 
-  platform_rtc_init();
   trap_init();
-  platform_plic_init();
-
   console_init();  // console layer on uart
   log_init_baremetal();
 
   time_init();
   threads_init();
 
-  /* 启动第一次定时器 */
   arch_enable_timer_interrupts();
-  platform_timer_start_after(DELTA_TICKS);
+  arch_enable_external_interrupts();
 
+  platform_timer_start_after(DELTA_TICKS);
   platform_rtc_set_alarm_after(3ULL * 1000 * 1000 * 1000);
 
   pr_info("system init done, starting user main...");

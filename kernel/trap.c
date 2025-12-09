@@ -36,10 +36,6 @@ void trap_init(void)
   reg_t ksp = (reg_t)(kernel_stack + KERNEL_STACK_SIZE);
   ksp &= ~(reg_t)0xFUL;
   csr_write(sscratch, ksp);
-
-  // 这里先关掉所有 S-mode 中断，platform_plic_init开启
-  csr_clear(sstatus, SSTATUS_SIE);
-  csr_clear(sie, SIE_STIE | SIE_SEIE | SIE_SSIE);
 }
 
 static void timer_handler(struct trapframe *tf)

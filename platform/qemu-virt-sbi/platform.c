@@ -1,4 +1,4 @@
-// platform/qemu-virt-sbi/platform_sbi.c
+// platform/qemu-virt-sbi/platform.c
 
 #include <stdint.h>
 #include <stddef.h>
@@ -137,14 +137,20 @@ void platform_plic_init(void)
   uint32_t uart_irq = uart16550_get_irq();
   plic_set_priority(uart_irq, 1);
   plic_enable_irq(uart_irq);
+  platform_register_irq_handler(uart_irq, uart16550_irq_handler);
 
   uint32_t rtc_irq = goldfish_rtc_get_irq();
   plic_set_priority(rtc_irq, 1);
   plic_enable_irq(rtc_irq);
+  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler);
+}
 
-  // 3. S-mode 打开外部中断
-  csr_set(sie, SIE_SEIE);
-  csr_set(sstatus, SSTATUS_SIE);
+void platform_init(uintptr_t dtb_pa) {
+  platform_set_dtb(dtb_pa);
+
+  platform_uart_init();
+  platform_rtc_init();
+  platform_plic_init();
 }
 
 /* ========== IRQ handler 注册表 ========== */

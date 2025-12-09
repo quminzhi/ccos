@@ -11,3 +11,9 @@ void arch_enable_timer_interrupts(void)
   sie |= SIE_STIE;
   csr_write(sie, sie);
 }
+
+void arch_enable_external_interrupts(void)
+{
+  csr_set(sie, SIE_SEIE);
+  csr_set(sstatus, SSTATUS_SIE);
+}

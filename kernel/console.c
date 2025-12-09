@@ -21,7 +21,7 @@ static inline int rb_is_full(void)
 
 void console_init(void)
 {
-  uart16550_init();  // 打开 UART，顺便开 RX 中断
+  // uart16550_init();  // 打开 UART，顺便开 RX 中断
 }
 
 /* 给内核 / sys_write 用的输出 */
