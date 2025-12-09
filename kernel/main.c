@@ -18,7 +18,7 @@ void kernel_main(long hartid, long dtb_pa)
 {
   (void)hartid;
 
-  platform_init(dtb_pa);
+  platform_init((uintptr_t)hartid, (uintptr_t)dtb_pa);
   platform_puts("Booting...\n");
 
   trap_init();

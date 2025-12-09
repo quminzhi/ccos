@@ -2,12 +2,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include "riscv_csr.h"
 #include "uart_16550.h"
 #include "goldfish_rtc.h"
 #include "platform.h"
 #include "plic.h"
-#include "sbi.h"
+#include "timer.h"
 
 static const void* g_dtb;  // 全局 DTB 指针
 
@@ -101,18 +100,15 @@ void platform_puts(const char* s)
 
 /* ========== 定时器相关 ========== */
 
-platform_time_t platform_time_now(void)
-{
-  /* 依赖 OpenSBI 配好的 mcounteren，允许 S 模式读 time CSR */
-  return csr_read(time);
-}
+void platform_timer_init(uintptr_t hartid) { timer_init(hartid); }
 
-void platform_timer_start_at(platform_time_t when) { sbi_set_timer(when); }
+platform_time_t platform_time_now(void) { return timer_now(); }
+
+void platform_timer_start_at(platform_time_t when) { timer_start_at(when); }
 
 void platform_timer_start_after(platform_time_t delta_ticks)
 {
-  platform_time_t now = platform_time_now();
-  platform_timer_start_at(now + delta_ticks);
+  timer_start_after(delta_ticks);
 }
 
 /* ========== RTC ========== */
@@ -145,11 +141,14 @@ void platform_plic_init(void)
   platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler);
 }
 
-void platform_init(uintptr_t dtb_pa) {
+void platform_init(uintptr_t hartid, uintptr_t dtb_pa)
+{
   platform_set_dtb(dtb_pa);
 
   platform_uart_init();
   platform_rtc_init();
+  platform_timer_init(hartid);
+
   platform_plic_init();
 }
 

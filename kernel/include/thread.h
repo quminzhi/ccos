@@ -20,7 +20,7 @@
 #define THREAD_STACK_SIZE 4096
 #endif
 
-#define DELTA_TICKS 10000000UL /* ~1s */
+#define DELTA_TICKS 1000000UL /* ~0.1s */
 
 /* -------------------------------------------------------------------------- */
 /* Core thread API                                                            */

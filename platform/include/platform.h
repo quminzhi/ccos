@@ -29,14 +29,14 @@ void platform_rtc_set_alarm_after(uint64_t delay_ns);
 
 void platform_idle(void);
 
-/* 当前时间：读取 time CSR */
+/* timer */
 platform_time_t platform_time_now(void);
 void platform_timer_start_after(platform_time_t delta_ticks);
 void platform_timer_start_at(platform_time_t when);
 
 void platform_plic_init(void);
 
-void platform_init(uintptr_t dtb_pa);
+void platform_init(uintptr_t hartid, uintptr_t dtb_pa);
 
 void platform_register_irq_handler(uint32_t irq, void (*handler)(void));
 void platform_handle_s_external(struct trapframe *tf);
