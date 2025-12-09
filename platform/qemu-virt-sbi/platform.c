@@ -122,6 +122,87 @@ void platform_rtc_set_alarm_after(uint64_t delay_ns)
   goldfish_rtc_set_alarm_after(delay_ns);
 }
 
+/* ========== IRQ handler 注册表 ========== */
+
+#define MAX_IRQ 64
+
+typedef struct {
+  irq_handler_t handler;
+  void* arg;
+} irq_entry_t;
+
+typedef struct {
+  uint64_t count;              // 触发次数
+  platform_time_t last_tick;   // 上次触发的 tick
+  platform_time_t first_tick;  // 第一次触发
+  platform_time_t max_delta;   // 相邻两次最大间隔（可选）
+} irq_stat_t;
+
+static irq_entry_t s_irq_table[MAX_IRQ];
+static irq_stat_t s_irq_stats[MAX_IRQ];
+static const char* s_irq_name[MAX_IRQ];
+
+static void platform_irq_table_init(void)
+{
+  for (int i = 0; i < MAX_IRQ; ++i) {
+    s_irq_table[i].handler = NULL;
+    s_irq_table[i].arg     = NULL;
+  }
+}
+
+void platform_register_irq_handler(uint32_t irq, irq_handler_t handler,
+                                   void* arg, const char* name)
+{
+  if (irq >= MAX_IRQ) {
+    return;
+  }
+
+  s_irq_table[irq].handler = handler;
+  s_irq_table[irq].arg     = arg;
+  s_irq_name[irq]          = name;
+
+  plic_set_priority(irq, 1);
+  plic_enable_irq(irq);
+}
+
+void platform_handle_s_external(struct trapframe* tf)
+{
+  (void)tf;
+  for (;;) {
+    uint32_t irq = plic_claim();
+    if (!irq) break;
+
+    platform_time_t now = platform_time_now();
+
+    if (irq < MAX_IRQ) {
+      irq_stat_t* st = &s_irq_stats[irq];
+      if (st->count == 0) {
+        st->first_tick = now;
+      } else {
+        platform_time_t delta = now - st->last_tick;
+        if (delta > st->max_delta) st->max_delta = delta;
+      }
+      st->last_tick = now;
+      st->count++;
+    }
+
+    irq_handler_t handler = NULL;
+    void* arg             = NULL;
+    if (irq < MAX_IRQ) {
+      handler = s_irq_table[irq].handler;
+      arg     = s_irq_table[irq].arg;
+    }
+
+    if (handler) {
+      handler(irq, arg);
+    } else {
+      platform_puts("unknown PLIC irq\n");
+    }
+
+    plic_complete(irq);
+  }
+}
+
 /* ========== PLIC & IRQ ========== */
 
 void platform_plic_init(void)
@@ -131,14 +212,11 @@ void platform_plic_init(void)
 
   // 2. 开 UART0 RTC 中断
   uint32_t uart_irq = uart16550_get_irq();
-  plic_set_priority(uart_irq, 1);
-  plic_enable_irq(uart_irq);
-  platform_register_irq_handler(uart_irq, uart16550_irq_handler);
+  platform_register_irq_handler(uart_irq, uart16550_irq_handler, NULL, "uart0");
 
   uint32_t rtc_irq = goldfish_rtc_get_irq();
-  plic_set_priority(rtc_irq, 1);
-  plic_enable_irq(rtc_irq);
-  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler);
+  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler, NULL,
+                                "rtc0");
 }
 
 void platform_init(uintptr_t hartid, uintptr_t dtb_pa)
@@ -149,46 +227,27 @@ void platform_init(uintptr_t hartid, uintptr_t dtb_pa)
   platform_rtc_init();
   platform_timer_init(hartid);
 
+  platform_irq_table_init();
   platform_plic_init();
 }
 
-/* ========== IRQ handler 注册表 ========== */
-
-#define MAX_IRQ 64  // QEMU virt 上基本够用，后面不够再扩
-typedef void (*irq_handler_t)(void);
-static irq_handler_t s_irq_table[MAX_IRQ];
-
-void platform_register_irq_handler(uint32_t irq, irq_handler_t handler)
-{
-  if (irq < MAX_IRQ) {
-    s_irq_table[irq] = handler;
-  }
-}
-
-void platform_handle_s_external(struct trapframe* tf)
-{
-  (void)tf;  // 暂时用不到
-
-  uint32_t irq = plic_claim();
-  if (!irq) {
-    return;  // spurious
-  }
-
-  irq_handler_t h = NULL;
-  if (irq < MAX_IRQ) {
-    h = s_irq_table[irq];
-  }
-
-  if (h) {
-    h();
-  } else {
-    platform_puts("unknown PLIC irq\n");
-  }
-
-  plic_complete(irq);
-}
-
 /* ========== MISC ========== */
+
+size_t platform_irq_get_stats(platform_irq_stat_t* out, size_t max)
+{
+  if (!out) return 0;
+
+  size_t n = (max < MAX_IRQ) ? max : MAX_IRQ;
+  for (size_t i = 0; i < n; ++i) {
+    out[i].irq        = (uint32_t)i;
+    out[i].count      = s_irq_stats[i].count;
+    out[i].first_tick = s_irq_stats[i].first_tick;
+    out[i].last_tick  = s_irq_stats[i].last_tick;
+    out[i].max_delta  = s_irq_stats[i].max_delta;
+    out[i].name       = s_irq_name[i];
+  }
+  return n;
+}
 
 void platform_idle(void)
 {

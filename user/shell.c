@@ -19,6 +19,7 @@ typedef struct ShellProc {
 } ShellProc;
 
 static ShellProc g_procs[SHELL_MAX_PROCS];
+static struct irqstat_user g_irqstat_buf[IRQSTAT_MAX_IRQ];
 
 static ShellProc* shell_proc_alloc(const char* line)
 {
@@ -28,7 +29,7 @@ static ShellProc* shell_proc_alloc(const char* line)
       p->in_use = 1;
 
       // 安全拷贝命令行，确保以 '\0' 结尾
-      int j = 0;
+      int j     = 0;
       while (line[j] && j < SHELL_MAX_LINE - 1) {
         p->line[j] = line[j];
         ++j;
@@ -39,7 +40,7 @@ static ShellProc* shell_proc_alloc(const char* line)
     }
   }
 
-  return NULL; // 没空位
+  return NULL;  // 没空位
 }
 
 static void shell_proc_free(ShellProc* p)
@@ -159,7 +160,7 @@ typedef struct {
   const char* name;
   shell_cmd_fn fn;
   const char* help;
-  int run_in_shell; // 1 = 在 shell 线程中直接执行（不 spawn 子线程）
+  int run_in_shell;  // 1 = 在 shell 线程中直接执行（不 spawn 子线程）
   // 0 = 通过 sh-cmd 子线程执行（create + join）
 } shell_cmd_t;
 
@@ -173,19 +174,20 @@ static void cmd_jobs(int argc, char** argv);
 static void cmd_kill(int argc, char** argv);
 static void cmd_date(int argc, char** argv);
 static void cmd_uptime(int argc, char** argv);
-
+static void cmd_irqstat(int argc, char** argv);
 
 /* 命令表 */
 static const shell_cmd_t g_shell_cmds[] = {
-    {"help", cmd_help, "show this help", 1},
-    {"echo", cmd_echo, "echo arguments", 1}, // 也可以设成 0，看你喜好
-    {"sleep", cmd_sleep, "sleep <ticks> (thread sleep)", 0},
-    {"ps", cmd_ps, "list threads", 1},
-    {"jobs", cmd_jobs, "list user threads", 1},
-    {"kill", cmd_kill, "kill <tid>", 1},
-    {"date", cmd_date, "date", 0},
-    {"uptime", cmd_uptime, "uptime", 0},
-    {"exit", cmd_exit, "exit shell", 1},
+    {"help",    cmd_help,    "show this help",               1},
+    {"echo",    cmd_echo,    "echo arguments",               1}, // 也可以设成 0，看你喜好
+    {"sleep",   cmd_sleep,   "sleep <ticks> (thread sleep)", 0},
+    {"ps",      cmd_ps,      "list threads",                 1},
+    {"jobs",    cmd_jobs,    "list user threads",            1},
+    {"kill",    cmd_kill,    "kill <tid>",                   1},
+    {"date",    cmd_date,    "date",                         0},
+    {"uptime",  cmd_uptime,  "uptime",                       0},
+    {"irqstat", cmd_irqstat, "irqstat",                      0},
+    {"exit",    cmd_exit,    "exit shell",                   1},
 };
 
 static const int g_shell_cmd_count =
@@ -299,7 +301,7 @@ static void cmd_jobs(int argc, char** argv)
   for (int i = 0; i < n; ++i) {
     const struct u_thread_info* ti = &infos[i];
     if (!ti->is_user) {
-      continue; // 只关心 U 模式线程
+      continue;  // 只关心 U 模式线程
     }
     // 你也可以在这里再过滤掉 shell 自己 / user_main 等
     u_printf(" %-4d %-9s %s\n", ti->tid, thread_state_name(ti->state),
@@ -348,13 +350,10 @@ static void cmd_date(int argc, char** argv)
   }
 
   datetime_t dt;
-  // epoch_to_utc_datetime(ts.tv_sec, &dt);
-
   epoch_to_utc_datetime(ts.tv_sec, &dt);
 
-  u_printf("%04d-%02d-%02d %02d:%02d:%02d\n",
-         dt.year, dt.month, dt.day,
-         dt.hour, dt.min, dt.sec);
+  u_printf("%04d-%02d-%02d %02d:%02d:%02d\n", dt.year, dt.month, dt.day,
+           dt.hour, dt.min, dt.sec);
 }
 
 static void cmd_uptime(int argc, char** argv)
@@ -368,10 +367,37 @@ static void cmd_uptime(int argc, char** argv)
   }
 
   u_printf("uptime: %llu.%09u seconds since kernel boot\n",
-           (unsigned long long)ts.tv_sec,
-           (unsigned)ts.tv_nsec);
+           (unsigned long long)ts.tv_sec, (unsigned)ts.tv_nsec);
 }
 
+static void cmd_irqstat(int argc, char** argv)
+{
+  (void)argc;
+  (void)argv;
+
+  long n = irq_get_stats(g_irqstat_buf, IRQSTAT_MAX_IRQ);
+  if (n < 0) {
+    u_printf("irqstat: syscall failed (%ld)\n", n);
+    return;
+  }
+
+  u_printf(
+      "irq  count            last_tick(ns)        max_delta(ns)       name\n");
+
+  for (long i = 0; i < n; ++i) {
+    if (g_irqstat_buf[i].count == 0) {
+      continue;
+    }
+
+    const char* name = g_irqstat_buf[i].name[0] ? g_irqstat_buf[i].name : "-";
+
+    u_printf("%3u  %10llu   0x%016llx   0x%016llx   %s\n",
+             (unsigned)g_irqstat_buf[i].irq,
+             (unsigned long long)g_irqstat_buf[i].count,
+             (unsigned long long)g_irqstat_buf[i].last_tick,
+             (unsigned long long)g_irqstat_buf[i].max_delta, name);
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /* shell 主循环                                                               */
@@ -449,7 +475,7 @@ static int shell_run_command(const char* line)
   // 这里你可以选择打印退出码（调试时很有用）
   // u_printf("[cmd exit] tid=%d, status=%d\n", tid, status);
 
-  return status; // 类似 waitpid 拿到的 WEXITSTATUS
+  return status;  // 类似 waitpid 拿到的 WEXITSTATUS
 }
 
 static void shell_dispatch_line(char* line)
@@ -468,7 +494,7 @@ static void shell_dispatch_line(char* line)
   char* argv[SHELL_MAX_ARGS];
   int argc = shell_parse_line(line, argv, SHELL_MAX_ARGS);
   if (argc == 0) {
-    return; // 空行
+    return;  // 空行
   }
 
   const shell_cmd_t* cmd = shell_find_cmd(argv[0]);

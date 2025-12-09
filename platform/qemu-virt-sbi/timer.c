@@ -5,6 +5,7 @@
 
 // 在 “OpenSBI + S-mode kernel” 这个架构下，CLINT 这片地址空间是 M 态私有的，
 // S 态不能直接读写 0x0200_0000 那一段。
+// CLINT/ACLINT node 是给 M 态（OpenSBI）看的，S 态只能用 SBI。
 // “CLINT 后端”属于 “直接摸 CLINT MMIO 的玩法”，在当前架构下是非法的。
 // 我们先注释CLINT后端，给自定义M模式预留。
 
@@ -59,8 +60,8 @@ void timer_init(uintptr_t hartid)
 
   // uintptr_t clint_base = (uintptr_t)base;
 
-  // clint_mtime          = (volatile uint64_t *)(clint_base + CLINT_MTIME_BASE);
-  // clint_mtimecmp =
+  // clint_mtime          = (volatile uint64_t *)(clint_base +
+  // CLINT_MTIME_BASE); clint_mtimecmp =
   //     (volatile uint64_t *)(clint_base + CLINT_MTIMECMP_BASE + 8u * hartid);
 
   // timer_backend = TIMER_BACKEND_CLINT;
@@ -83,7 +84,7 @@ void timer_start_at(platform_time_t when)
   // if (timer_backend == TIMER_BACKEND_CLINT && clint_mtimecmp) {
   //   *clint_mtimecmp = when;
   // } else {
-    sbi_set_timer(when);
+  sbi_set_timer(when);
   // }
 }
 

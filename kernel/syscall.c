@@ -107,3 +107,14 @@ int clock_gettime(int clock_id, struct timespec *ts)
   // 约定：a0 返回 0 表示成功，<0 表示错误
   return (int)a0;
 }
+
+long irq_get_stats(struct irqstat_user *buf, size_t n)
+{
+  register uintptr_t a0 asm("a0") = SYS_IRQ_GET_STATS;
+  register uintptr_t a1 asm("a1") = (uintptr_t)buf;
+  register uintptr_t a2 asm("a2") = (uintptr_t)n;
+
+  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
+
+  return (long)a0;  // 返回实际写入的条数（<0 表示错误）
+}

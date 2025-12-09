@@ -157,6 +157,10 @@ static uintptr_t syscall_handler(struct trapframe *tf)
       ADVANCE_SEPC();
       tf->a0 = sys_clock_gettime((int)tf->a1, (struct timespec *)tf->a2);
       break;
+    case SYS_IRQ_GET_STATS:
+      ADVANCE_SEPC();
+      tf->a0 = sys_irq_get_stats((struct irqstat_user *)tf->a1, (size_t)tf->a2);
+      break;
     default:
       ADVANCE_SEPC();
       dump_trap(tf);

@@ -10,7 +10,7 @@ static volatile uint32_t g_rx_head = 0;  // 下一个写位置
 static volatile uint32_t g_rx_tail = 0;  // 下一个读位置
 
 /* 当前有哪个线程在等 stdin？没有则为 -1 */
-tid_t g_stdin_waiter        = -1;
+tid_t g_stdin_waiter               = -1;
 
 static inline int rb_is_empty(void) { return g_rx_head == g_rx_tail; }
 
@@ -21,7 +21,8 @@ static inline int rb_is_full(void)
 
 void console_init(void)
 {
-  // uart16550_init();  // 打开 UART，顺便开 RX 中断
+  g_rx_head = g_rx_tail = 0;
+  g_stdin_waiter        = -1;
 }
 
 /* 给内核 / sys_write 用的输出 */

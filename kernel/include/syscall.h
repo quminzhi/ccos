@@ -6,7 +6,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "thread_sys.h"
-#include "time_sys.h"
+#include "uapi.h"
+
+struct timespec;
 
 #define FD_STDIN  0
 #define FD_STDOUT 1
@@ -21,7 +23,8 @@ enum {
   SYS_READ          = 6,
   SYS_THREAD_LIST   = 7,
   SYS_THREAD_KILL   = 8,
-  SYS_CLOCK_GETTIME = 9
+  SYS_CLOCK_GETTIME = 9,
+  SYS_IRQ_GET_STATS = 10
 };
 
 uint64_t write(int fd, const void *buf, uint64_t len);
@@ -43,5 +46,7 @@ int thread_kill(tid_t tid);                           // 0=OK, <0=错误
 
 // clock_id support CLOCK_REALTIME(0) only
 int clock_gettime(int clock_id, struct timespec *ts);
+
+long irq_get_stats(struct irqstat_user *ubuf, size_t n);
 
 #endif  // SYSCALL_H

@@ -9,6 +9,18 @@ struct trapframe;
 
 /* 用 time CSR 的 tick 作为时间单位（QEMU virt 上通常是 10MHz） */
 typedef uint64_t platform_time_t;
+typedef void (*irq_handler_t)(uint32_t irq, void *arg);
+
+typedef struct {
+  uint32_t irq;
+  uint64_t count;
+  platform_time_t first_tick;
+  platform_time_t last_tick;
+  platform_time_t max_delta;
+  const char *name;
+} platform_irq_stat_t;
+
+size_t platform_irq_get_stats(platform_irq_stat_t* out, size_t max);
 
 const void *platform_get_dtb(void);
 void platform_set_dtb(uintptr_t dtb_pa);
@@ -38,7 +50,8 @@ void platform_plic_init(void);
 
 void platform_init(uintptr_t hartid, uintptr_t dtb_pa);
 
-void platform_register_irq_handler(uint32_t irq, void (*handler)(void));
+void platform_register_irq_handler(uint32_t irq, irq_handler_t handler,
+                                   void *arg, const char *name);
 void platform_handle_s_external(struct trapframe *tf);
 
 #endif /* PLATFORM_H */

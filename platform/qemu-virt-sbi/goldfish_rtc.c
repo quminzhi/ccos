@@ -93,8 +93,10 @@ void goldfish_rtc_set_alarm_after(uint64_t delay_ns)
   rtc_w32(RTC_IRQ_ENABLED, 1);
 }
 
-void goldfish_rtc_irq_handler(void)
+void goldfish_rtc_irq_handler(uint32_t irq, void *arg)
 {
+  (void)irq;
+  (void)arg;
   /*
    * 这里已经是“RTC 这个 IRQ 的 handler”了，不需要再读 ALARM_STATUS。
    *

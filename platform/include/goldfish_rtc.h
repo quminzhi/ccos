@@ -11,4 +11,4 @@ uint64_t goldfish_rtc_read_ns(void);
 void goldfish_rtc_set_alarm_after(uint64_t delay_ns);
 
 uint32_t goldfish_rtc_get_irq(void);
-void goldfish_rtc_irq_handler(void);
+void goldfish_rtc_irq_handler(uint32_t irq, void *arg);

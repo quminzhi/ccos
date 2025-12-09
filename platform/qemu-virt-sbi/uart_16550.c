@@ -52,8 +52,11 @@ void uart16550_init(void)
   uart_ier_write(UART_IER_ERBFI);
 }
 
-void uart16550_irq_handler(void)
+void uart16550_irq_handler(uint32_t irq, void *arg)
 {
+  (void)irq;
+  (void)arg;
+
   while (uart_lsr_read() & UART_LSR_DR) {
     uint8_t ch = uart_rbr_read();
     console_on_char_from_irq(ch);
