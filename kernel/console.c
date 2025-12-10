@@ -39,23 +39,23 @@ int console_read_nonblock(char *buf, size_t len)
   return (int)n;
 }
 
-int console_read_block_once(char *buf, size_t len, struct trapframe *tf)
-{
-  if (len == 0) return 0;
+// int console_read_block_once(char *buf, size_t len, struct trapframe *tf)
+// {
+//   if (len == 0) return 0;
 
-  int n = console_read_nonblock(buf, len);
-  if (n > 0) {
-    return n;  // 直接有数据
-  }
+//   int n = console_read_nonblock(buf, len);
+//   if (n > 0) {
+//     return n;  // 直接有数据
+//   }
 
-  /* 没数据：登记自己是 stdin_waiter，然后 block */
-  g_stdin_waiter = thread_current();
+//   /* 没数据：登记自己是 stdin_waiter，然后 block */
+//   g_stdin_waiter = thread_current();
 
-  thread_block(tf);  // 当前线程状态→BLOCKED，调度出去
-  /* 不会在“当前线程”的语义下继续执行这后面的代码 */
+//   thread_block(tf);  // 当前线程状态→BLOCKED，调度出去
+//   /* 不会在“当前线程”的语义下继续执行这后面的代码 */
 
-  return 0;  // 这行只是语法需要，逻辑上不会给当前线程用到
-}
+//   return 0;  // 这行只是语法需要，逻辑上不会给当前线程用到
+// }
 
 /* 中断上下文调用：把字符塞进 ring buffer */
 void console_on_char_from_irq(uint8_t ch)

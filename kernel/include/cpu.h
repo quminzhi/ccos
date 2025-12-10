@@ -9,6 +9,9 @@
  * - tp 是 per-CPU 的，不是 per-thread 的。
  */
 
+#define NO_BOOT_HART 0xFFFFFFFF 
+
+extern volatile uint32_t g_boot_hartid;
 extern volatile int smp_boot_done;
 
 struct cpu {
@@ -45,3 +48,5 @@ static inline void smp_mb(void)
 }
 
 void cpu_init_this_hart(uintptr_t hartid);
+void set_smp_boot_done();
+void wait_for_smp_boot_done();

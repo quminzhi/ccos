@@ -1,27 +1,23 @@
     /*       start.S */
     .section .text.entry
     .globl   _start
+    .globl   secondary_entry     # 预留给以后 sbi_hart_start 用
     .option  norvc
 
 #include "cpu_defs.h"
 
-    .extern  g_kstack                                # uint8_t g_kstack[MAX_HARTS][KSTACK_SIZE];
+    .extern  g_kstack            # uint8_t g_kstack[MAX_HARTS][KSTACK_SIZE];
+    .extern  kernel_main
 
 _start:
-# OpenSBI 约定：
 # a0 = hartid
 # a1 = dtb_pa
-# 不能直接 csrr t3,mhartid
-    mv       t3, a0                                  # t3 = hartid
+    mv       t3, a0              # t3 = hartid
 
-# a0 / a1 保留 OpenSBI 约定：
-# a0 = hartid, a1 = dtb_pa
-    mv       a0, t3
+# -------------------- 冷启动路径：清 BSS --------------------
+# 当前 OpenSBI HSM 语义下，只有 Boot HART 会走到这里，
+# 所以这里可以放心认为“只执行一次”。
 
-# -------------------- 只让 hart0 清 BSS --------------------
-    bnez     t3, 2f                                  # 如果 hartid != 0，跳过 BSS 清零
-
-# 这里是主核专属路径：用启动栈清 BSS
     la       sp, __stack_top
 
     la       t0, __bss_start
@@ -29,40 +25,43 @@ _start:
 
 # 按 8 字节对齐起始地址
     andi     t2, t0, 7
-    beqz     t2, 1f
+    beqz     t2, .L_bss_aligned
 
-0:
-    bgeu     t0, t1, bss_done
+.L_bss_align:
+    bgeu     t0, t1, .L_bss_done
     sb       zero, 0(t0)
     addi     t0, t0, 1
     andi     t2, t0, 7
-    bnez     t2, 0b
+    bnez     t2, .L_bss_align
 
-1:
-    bgeu     t0, t1, bss_done
+.L_bss_aligned:
+    bgeu     t0, t1, .L_bss_done
     sd       zero, 0(t0)
     addi     t0, t0, 8
-    j        1b
+    j        .L_bss_aligned
 
-bss_done:
-# 主核 BSS 清完，继续到后面的 per-hart 栈设置
-    j        2f
+.L_bss_done:
+# BSS 已清零，可以安全用 g_kstack / 全局变量
+    j        per_hart_start
 
-# -------------------- 其他 hart 从这里接着走 --------------------
-2:
-# 从这里开始，假定 BSS 已经被 hart0 清完，可以安全使用 g_kstack
+# -------------------- 二级入口：给 sbi_hart_start 用 --------------------
+# 以后在 primary_main 里用 HSM:
+# sbi_hart_start(h, secondary_entry, dtb_pa);
+# 这样其它 hart 就从这里进来，不会再清 BSS。
+secondary_entry:
+# a0 = hartid, a1 = dtb_pa (opaque)
+    mv       t3, a0
 
-# t3 里已经是 hartid
-    la       t0, g_kstack                            # &g_kstack[0][0]
-    li       t1, KSTACK_SIZE                         # 每 hart 的内核栈大小
-    mul      t2, t3, t1                              # t2 = hartid * KSTACK_SIZE
-    add      t0, t0, t2                              # &g_kstack[hartid][0]
-    add      t0, t0, t1                              # &g_kstack[hartid][KSTACK_SIZE] = 栈顶
+per_hart_start:
+# 为每个 hart 设置自己的内核栈和 sscratch
+    la       t0, g_kstack        # &g_kstack[0][0]
+    li       t1, KSTACK_SIZE
+    mul      t2, t3, t1          # t2 = hartid * KSTACK_SIZE
+    add      t0, t0, t2          # &g_kstack[hartid][0]
+    add      t0, t0, t1          # &g_kstack[hartid][KSTACK_SIZE]
 
-    mv       sp, t0                                  # sp = 当前 hart 的内核栈顶
-    csrw     sscratch, t0                            # trap_entry 里会用 sscratch 作内核栈顶
+    mv       sp, t0
+    csrw     sscratch, t0
 
-    /*
-    *        a0 = hartid, a1 = dtb_pa（保持 OpenSBI 约定）
-    */
+# 保持 OpenSBI 约定：a0 = hartid, a1 = dtb_pa
     tail     kernel_main

@@ -1,6 +1,19 @@
 #ifndef BAREMETAL_LOG_CONFIG_H
 #define BAREMETAL_LOG_CONFIG_H
 
+#include "spinlock.h"
+
+#ifndef __ASSEMBLER__
+
+// 声明在 log_lock.c 里定义的全局锁
+extern spinlock_t g_log_lock;
+
+// LOG_LOCK and LOG_UNLOCK hooks
+#define LOG_LOCK()   spin_lock(&g_log_lock)
+#define LOG_UNLOCK() spin_unlock(&g_log_lock)
+
+#endif /* __ASSEMBLER__ */
+
 #define LOG_COMPILE_LEVEL         LOG_LEVEL_DEBUG
 #define LOG_RUNTIME_DEFAULT_LEVEL LOG_LEVEL_DEBUG
 #define LOG_DEFAULT_PATH_MODE     LOG_PATH_BASENAME

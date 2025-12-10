@@ -10,7 +10,7 @@
 #include "log.h"
 #include "panic.h"
 #include "sysfile.h"
-#include "spinlock.h"
+#include "lock.h"
 
 #ifndef NDEBUG
 extern void print_thread_prefix(void);

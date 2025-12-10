@@ -1,11 +1,21 @@
+// kernel/include/spinlock.h
+#pragma once
+
+#ifndef __ASSEMBLER__  // ← 只有 C/C++ 编译时才看到下面的内容
+
 #include <stdint.h>
 
 typedef struct {
   volatile uint32_t locked;  // 0 = unlocked, 1 = locked
 } spinlock_t;
 
-static inline void spin_lock(spinlock_t *lk)
-{
+#define SPINLOCK_INIT {.locked = 0}
+
+static inline void spinlock_init(spinlock_t *lk) {
+  lk->locked = 0;
+}
+
+static inline void spin_lock(spinlock_t *lk) {
   uint32_t tmp;
   do {
     __asm__ volatile("amoswap.w.aq %0, %2, %1\n"
@@ -15,12 +25,8 @@ static inline void spin_lock(spinlock_t *lk)
   } while (tmp != 0);
 }
 
-static inline void spin_unlock(spinlock_t *lk)
-{
+static inline void spin_unlock(spinlock_t *lk) {
   __asm__ volatile("amoswap.w.rl x0, x0, %0\n" : "+A"(lk->locked) : : "memory");
 }
 
-spinlock_t g_kernel_lock = {0};
-
-static inline void kernel_lock(void) { spin_lock(&g_kernel_lock); }
-static inline void kernel_unlock(void) { spin_unlock(&g_kernel_lock); }
+#endif /* !__ASSEMBLER__ */

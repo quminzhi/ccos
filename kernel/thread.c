@@ -243,7 +243,7 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
 }
 
 // "exec"
-tid_t threads_exec(thread_entry_t user_main, void *arg)
+tid_t thread_exec(thread_entry_t user_main, void *arg)
 {
   tid_t tid = thread_create_user(user_main, arg, "user_main");
   if (tid < 0) {

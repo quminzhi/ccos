@@ -34,8 +34,5 @@ void ktime_get_monotonic_ts(struct k_timespec *ts)
 
 void time_init(void)
 {
-  // 目前啥也不用干，将来如果你要：
-  // - 在这里记录 boot_mono/boot_real
-  // - 或者校准 RTC offset
   boot_real_ns = platform_rtc_read_ns();
 }

@@ -161,7 +161,7 @@ endif
 # 规则
 # ---------------------------------------------------------------------------
 
-.PHONY: all build clean run debug-sources disasm-all objdump-objs symbols size
+.PHONY: all build run disasm-all objdump-objs symbols size
 
 all: build
 
@@ -238,7 +238,8 @@ OPENSBI_BUILD_DIR  := $(BUILD_DIR)/opensbi
 OPENSBI_PLATFORM   := generic
 
 # 我们使用 OpenSBI 的 fw_jump.elf 作为 QEMU 的 BIOS
-OPENSBI_FW_JUMP    := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.elf
+OPENSBI_FW_JUMP     := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.elf
+OPENSBI_FW_JUMP_BIN := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.bin
 
 # ---------------------------------------------------------------------------
 # OpenSBI 构建规则
@@ -285,16 +286,16 @@ QEMU_GDB_PORT ?= 1234
 qemu: $(TARGET) $(DTS) $(OPENSBI_FW_JUMP)
 	@echo "  QEMU  $(TARGET) (OpenSBI: $(OPENSBI_FW_JUMP))"
 	$(QEMU) $(QEMU_OPTS) \
-		-bios $(OPENSBI_FW_JUMP) \
+		-bios $(OPENSBI_FW_JUMP_BIN) \
 		-kernel $(TARGET)
 
 debug: qemu-dbg
 
 # 调试运行：QEMU 不跑、挂起在 reset，开放 GDB 端口
-qemu-dbg: $(TARGET) $(OPENSBI_FW_JUMP)
+qemu-dbg: $(TARGET) $(OPENSBI_FW_JUMP) disasm-all
 	@echo "  QEMU-DBG  $(TARGET) (gdb on port $(QEMU_GDB_PORT))"
 	$(QEMU) $(QEMU_OPTS) \
-		-bios $(OPENSBI_FW_JUMP) \
+		-bios $(OPENSBI_FW_JUMP_BIN) \
 		-S -gdb tcp::$(QEMU_GDB_PORT) \
 		-kernel $(TARGET)
 
@@ -317,6 +318,8 @@ $(DTB):
 # 调试：打印当前参与构建的源文件
 # ---------------------------------------------------------------------------
 
+.PHONY: debug-sources clean-kernel clean clean-opensbi distclean
+
 debug-sources:
 	@echo "ARCH_SRCS     = $(ARCH_SRCS)"
 	@echo "PLATFORM_SRCS = $(PLATFORM_SRCS)"
@@ -325,6 +328,23 @@ debug-sources:
 	@echo "SRCS          = $(SRCS)"
 	@echo "OBJS          = $(OBJS)"
 
-clean:
-	@echo "  CLEAN"
-	rm -rf $(BUILD_DIR)
+# 让原来的 clean 变成“只清内核”
+clean: clean-kernel
+
+# 只清内核相关的构建产物（保留 build/opensbi）
+clean-kernel:
+	@echo "  CLEAN kernel artifacts"
+	rm -rf $(OBJ_DIR) $(DUMP_DIR) $(OUT_DIR) \
+	       $(TARGET_DISASM) $(TARGET_SYMS)
+
+# 调用 opensbi 自己的 clean（一般不常用）
+clean-opensbi:
+	@echo "  CLEAN OpenSBI artifacts"
+	$(MAKE) -C $(OPENSBI_DIR) \
+		O=$(abspath $(OPENSBI_BUILD_DIR)) \
+		clean || true
+
+# 全部干掉：内核 + OpenSBI，一般用于“重来一次”
+distclean: clean-kernel
+	@echo "  DISTCLEAN kernel + OpenSBI"
+	rm -rf $(OPENSBI_BUILD_DIR)

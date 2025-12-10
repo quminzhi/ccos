@@ -35,7 +35,7 @@ void threads_init(void);
 tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name);
 
 /* start first user main */
-tid_t threads_exec(thread_entry_t entry, void *arg);
+tid_t thread_exec(thread_entry_t entry, void *arg);
 
 /* 每个 timer tick 调用一次（通常在定时器中断里） */
 void threads_tick(void);

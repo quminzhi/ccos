@@ -48,7 +48,10 @@ void platform_timer_start_at(platform_time_t when);
 
 void platform_plic_init(void);
 
+/* 全局init */
 void platform_init(uintptr_t hartid, uintptr_t dtb_pa);
+void platform_boot_hart_init(uintptr_t hartid);
+void platform_secondary_hart_init(uintptr_t hartid);
 
 void platform_register_irq_handler(uint32_t irq, irq_handler_t handler,
                                    void *arg, const char *name);
