@@ -3,6 +3,8 @@
 
 #include "log_config.h"
 
+#define KSTACK_SIZE 4096  // 每个 hart 4KB 栈
+
 #define KERNEL_STACK_SIZE 4096
 #define THREAD_STACK_SIZE 4096
 #define THREAD_MAX 10

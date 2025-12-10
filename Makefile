@@ -14,18 +14,22 @@
 # make RELEASE=YES 切到 Release
 RELEASE ?= NO
 
+# CPU：make CPUS=4
+CPUS     ?= 1
+
 # ---------------------------------------------------------------------------
 # 工具链配置
 # ---------------------------------------------------------------------------
 
 # 交叉编译器前缀 (可在命令行覆盖：make CROSS_PREFIX=riscv64-gnu11-imafd-elf-)
-CROSS_PREFIX ?= riscv64-unknown-elf-
+CROSS_COMPILE ?= riscv64-unknown-elf-
 
-CC      := $(CROSS_PREFIX)gcc
-LD      := $(CROSS_PREFIX)gcc
-OBJDUMP := $(CROSS_PREFIX)objdump
+CC      := $(CROSS_COMPILE)gcc
+LD      := $(CROSS_COMPILE)gcc
+OBJDUMP := $(CROSS_COMPILE)objdump
 NM      := $(CROSS_COMPILE)nm
 SIZE    := $(CROSS_COMPILE)size
+
 GDB     := gdb-multiarch
 
 # ---------------------------------------------------------------------------
@@ -55,8 +59,6 @@ TARGET_SYMS   := $(OUT_DIR)/$(TARGET_NAME).sym
 # ---------------------------------------------------------------------------
 # 源文件组织
 # ---------------------------------------------------------------------------
-
-BUILD_DIR    := build
 
 ARCH_DIR     := arch/$(ARCH)
 PLATFORM_DIR := platform/$(PLATFORM)
@@ -119,15 +121,15 @@ CFLAGS += -include kernel_config.h
 CFLAGS  += -MMD -MP
 ASFLAGS += -MMD -MP
 
-# 如果你的 .S 也是用 gcc 编译，可以把 -march/-mabi/-mtune 合到 ASFLAGS 里：
-# ASFLAGS += -march=$(RISCV_ARCH) -mabi=$(RISCV_ABI) -mtune=$(RISCV_TUNE)
+# smp
+CFLAGS += -DMAX_HARTS=$(CPUS)
 
 # ========================
 # Debug / Release 特定 CFLAGS
 # ========================
 ifeq ($(RELEASE),YES)
   # ---- Release：偏性能，兼顾体积 ----
-  CFLAGS += -O2 -DNDEBUG -flto
+  CFLAGS += -O2 -DNDEBUG -flto -DKERNEL_BUILD_TYPE=\"release\"
   # 如果后面发现体积比性能更重要，可以改成：
   # CFLAGS += -Os -DNDEBUG -flto
 else
@@ -154,22 +156,6 @@ LDFLAGS := \
 ifeq ($(RELEASE),YES)
   LDFLAGS += -flto
 endif
-
-# ---------------------------------------------------------------------------
-# QEMU 运行配置
-# ---------------------------------------------------------------------------
-
-DTB := $(OUT_DIR)/virt.dtb
-DTS := $(OUT_DIR)/virt.dts
-
-QEMU_MACHINE         ?= virt
-QEMU_MACHINE_EXTRAS  ?=
-QEMU_COMMON_OPTS     ?= -nographic -bios default -m 128M
-
-QEMU      ?= qemu-system-riscv64
-QEMU_OPTS = -machine $(QEMU_MACHINE)$(QEMU_MACHINE_EXTRAS) $(QEMU_COMMON_OPTS)
-
-QEMU_GDB_PORT ?= 1234
 
 # ---------------------------------------------------------------------------
 # 规则
@@ -244,13 +230,35 @@ $(DUMP_DIR)/%.objdump: $(OBJ_DIR)/%.o
 	$(OBJDUMP) -d -S $< > $@
 
 # ---------------------------------------------------------------------------
+# QEMU 运行配置
+# ---------------------------------------------------------------------------
+
+DTB := $(OUT_DIR)/virt.dtb
+DTS := $(OUT_DIR)/virt.dts
+
+QEMU_MACHINE         ?= virt
+QEMU_MACHINE_EXTRAS  ?=
+QEMU_COMMON_OPTS     ?= -nographic -bios default -m 128M
+QEMU_SMP_OPTS        ?= -smp $(CPUS)
+
+QEMU      ?= qemu-system-riscv64
+QEMU_OPTS = -machine $(QEMU_MACHINE)$(QEMU_MACHINE_EXTRAS) \
+            $(QEMU_SMP_OPTS) $(QEMU_COMMON_OPTS)
+
+QEMU_GDB_PORT ?= 1234
+
+# ---------------------------------------------------------------------------
 # 运行 / 调试
 # ---------------------------------------------------------------------------
+
+.PHONY: qemu debug qemu-dbg gdb
 
 # 启动 QEMU + OpenSBI，在 S 模式运行内核
 qemu: $(TARGET) $(DTS)
 	@echo "  QEMU  $(TARGET)"
 	$(QEMU) $(QEMU_OPTS) -kernel $(TARGET)
+
+debug: qemu-dbg
 
 # 调试运行：QEMU 不跑、挂起在 reset，开放 GDB 端口
 qemu-dbg: $(TARGET)
@@ -269,6 +277,7 @@ $(DTB):
 	mkdir -p $(OUT_DIR)
 	$(QEMU) \
 		-machine virt,dumpdtb=$@ \
+		-smp $(CPUS) \
 		-nographic -S
 
 

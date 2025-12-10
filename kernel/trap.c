@@ -17,26 +17,16 @@ extern void print_thread_prefix(void);
 #endif
 extern void trap_entry(void);
 
-#ifndef KERNEL_STACK_SIZE
-#define KERNEL_STACK_SIZE 4096
-#endif
-static uint8_t kernel_stack[KERNEL_STACK_SIZE];
-
 static void dump_trap(struct trapframe *tf);
 static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid);
 
 void trap_init(void)
 {
-  /* 1. 设置 stvec = trap_entry（direct 模式） */
-  reg_t stvec = (reg_t)trap_entry;
-  stvec &= ~((reg_t)STVEC_MODE_MASK);
-  stvec |= STVEC_MODE_DIRECT;
-  csr_write(stvec, stvec);
+  reg_t addr = (reg_t)trap_entry;
+  reg_t val  = addr & ~((reg_t)STVEC_MODE_MASK);
+  val |= STVEC_MODE_DIRECT;
 
-  /* 2. 设置 sscratch = 内核栈顶 */
-  reg_t ksp = (reg_t)(kernel_stack + KERNEL_STACK_SIZE);
-  ksp &= ~(reg_t)0xFUL;
-  csr_write(sscratch, ksp);
+  csr_write(stvec, val);
 }
 
 static void timer_handler(struct trapframe *tf)

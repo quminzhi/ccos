@@ -22,6 +22,15 @@ static const int month_days[12] = {
   31  // Dec
 };
 
+static int is_leap_year(int year)
+{
+  // 公历规则：能被4整除且不能被100整除，或者能被400整除
+  if ((year % 4) != 0)    return 0;
+  if ((year % 100) != 0)  return 1;
+  if ((year % 400) != 0)  return 0;
+  return 1;
+}
+
 // 输入：epoch 秒（自 1970-01-01 00:00:00 UTC 起）
 // 输出：UTC 时间
 void epoch_to_utc_datetime(uint64_t epoch_sec, datetime_t *dt)
