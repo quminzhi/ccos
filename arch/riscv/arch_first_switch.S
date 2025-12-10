@@ -23,7 +23,7 @@ arch_first_switch:
   ld       ra, TF_RA(t0)
   ld       sp, TF_SP(t0)
   ld       gp, TF_GP(t0)
-  ld       tp, TF_TP(t0)
+  # ld       tp, TF_TP(t0)
 
   ld       t1, TF_T1(t0)
   ld       t2, TF_T2(t0)

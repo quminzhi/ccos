@@ -2,6 +2,13 @@
 #include <stdint.h>
 #include "cpu_defs.h"
 
+/*
+ * TP 与 CPU 约定
+ *
+ * - 在内核中，tp 永远指向当前 CPU 的 struct cpu（per-CPU 结构）
+ * - tp 是 per-CPU 的，不是 per-thread 的。
+ */
+
 extern volatile int smp_boot_done;
 
 struct cpu {

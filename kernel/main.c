@@ -72,5 +72,5 @@ void secondary_main(long hartid, long dtb_pa)
   (void)dtb_pa;
   trap_init();
 
-  pr_info("hart %ld online (secondary)", (long)hartid);
+  pr_info("hart %ld online (secondary)", cpu_current_hartid());
 }
