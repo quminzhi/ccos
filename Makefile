@@ -21,8 +21,8 @@ CPUS     ?= 1
 # 工具链配置
 # ---------------------------------------------------------------------------
 
-# 交叉编译器前缀 (可在命令行覆盖：make CROSS_PREFIX=riscv64-gnu11-imafd-elf-)
 CROSS_COMPILE ?= riscv64-unknown-elf-
+OPENSBI_CROSS_COMPILE ?= riscv64-unknown-linux-gnu-
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)gcc
@@ -165,7 +165,7 @@ endif
 
 all: build
 
-build: $(TARGET) $(DTS) disasm-all symbols objdump-objs size
+build: $(TARGET) $(DTS) disasm-all symbols objdump-objs size opensbi
 
 # 链接规则：注意先保证目录存在
 $(TARGET): $(OBJS)
@@ -230,6 +230,34 @@ $(DUMP_DIR)/%.objdump: $(OBJ_DIR)/%.o
 	$(OBJDUMP) -d -S $< > $@
 
 # ---------------------------------------------------------------------------
+# OpenSBI 集成
+# ---------------------------------------------------------------------------
+
+OPENSBI_DIR        := external/opensbi
+OPENSBI_BUILD_DIR  := $(BUILD_DIR)/opensbi
+OPENSBI_PLATFORM   := generic
+
+# 我们使用 OpenSBI 的 fw_jump.elf 作为 QEMU 的 BIOS
+OPENSBI_FW_JUMP    := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.elf
+
+# ---------------------------------------------------------------------------
+# OpenSBI 构建规则
+# ---------------------------------------------------------------------------
+
+.PHONY: opensbi
+
+opensbi: $(OPENSBI_FW_JUMP)
+
+$(OPENSBI_FW_JUMP):
+	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM)"
+	@mkdir -p $(OPENSBI_BUILD_DIR)
+	$(MAKE) -C $(OPENSBI_DIR) \
+		PLATFORM=$(OPENSBI_PLATFORM) \
+		CROSS_COMPILE=$(OPENSBI_CROSS_COMPILE) \
+		O=$(abspath $(OPENSBI_BUILD_DIR))
+
+
+# ---------------------------------------------------------------------------
 # QEMU 运行配置
 # ---------------------------------------------------------------------------
 
@@ -238,7 +266,7 @@ DTS := $(OUT_DIR)/virt.dts
 
 QEMU_MACHINE         ?= virt
 QEMU_MACHINE_EXTRAS  ?=
-QEMU_COMMON_OPTS     ?= -nographic -bios default -m 128M
+QEMU_COMMON_OPTS     ?= -nographic -m 128M
 QEMU_SMP_OPTS        ?= -smp $(CPUS)
 
 QEMU      ?= qemu-system-riscv64
@@ -253,19 +281,23 @@ QEMU_GDB_PORT ?= 1234
 
 .PHONY: qemu debug qemu-dbg gdb
 
-# 启动 QEMU + OpenSBI，在 S 模式运行内核
-qemu: $(TARGET) $(DTS)
-	@echo "  QEMU  $(TARGET)"
-	$(QEMU) $(QEMU_OPTS) -kernel $(TARGET)
+# 启动 QEMU + 自编译 OpenSBI，在 S 模式运行内核
+qemu: $(TARGET) $(DTS) $(OPENSBI_FW_JUMP)
+	@echo "  QEMU  $(TARGET) (OpenSBI: $(OPENSBI_FW_JUMP))"
+	$(QEMU) $(QEMU_OPTS) \
+		-bios $(OPENSBI_FW_JUMP) \
+		-kernel $(TARGET)
 
 debug: qemu-dbg
 
 # 调试运行：QEMU 不跑、挂起在 reset，开放 GDB 端口
-qemu-dbg: $(TARGET)
+qemu-dbg: $(TARGET) $(OPENSBI_FW_JUMP)
 	@echo "  QEMU-DBG  $(TARGET) (gdb on port $(QEMU_GDB_PORT))"
-	$(QEMU) $(QEMU_OPTS) -S -gdb tcp::$(QEMU_GDB_PORT) -kernel $(TARGET)
+	$(QEMU) $(QEMU_OPTS) \
+		-bios $(OPENSBI_FW_JUMP) \
+		-S -gdb tcp::$(QEMU_GDB_PORT) \
+		-kernel $(TARGET)
 
-# 在另一个终端里启动 GDB 并连接 QEMU
 gdb: $(TARGET)
 	@echo "  GDB   $(TARGET) (target remote :$(QEMU_GDB_PORT))"
 	$(GDB) $(TARGET) -ex "target remote :$(QEMU_GDB_PORT)"
