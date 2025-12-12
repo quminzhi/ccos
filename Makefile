@@ -67,6 +67,7 @@ USER_DIR     := user
 LIB_DIR      := lib
 LIBFDT_DIR   := lib/libfdt
 CONFIG_DIR   := config
+UAPI_DIR     := include/uapi
 
 ARCH_SRCS     := $(shell find $(ARCH_DIR)     -name '*.c' -o -name '*.S')
 PLATFORM_SRCS := $(shell find $(PLATFORM_DIR) -name '*.c' -o -name '*.S')
@@ -92,7 +93,8 @@ INCLUDE_DIRS := \
   -Iplatform/include \
   -I$(KERNEL_DIR)/include \
   -I$(LIB_DIR)/include \
-	-I$(LIBFDT_DIR)
+	-I$(LIBFDT_DIR) \
+	-I$(UAPI_DIR)
 
 # ---------------------------------------------------------------------------
 # 编译 / 链接选项

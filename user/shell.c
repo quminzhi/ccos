@@ -1,9 +1,10 @@
 #include "shell.h"
 #include "ulib.h"
 #include "syscall.h"
-#include "thread_sys.h"
-#include "time_sys.h"
+#include "uthread.h"
+#include "utime.h"
 #include "datetime.h"
+#include"spawn.h"
 
 /* -------------------------------------------------------------------------- */
 /* 配置                                                                       */
@@ -21,8 +22,7 @@ typedef struct ShellProc {
 static ShellProc g_procs[SHELL_MAX_PROCS];
 static struct irqstat_user g_irqstat_buf[IRQSTAT_MAX_IRQ];
 
-static ShellProc* shell_proc_alloc(const char* line)
-{
+static ShellProc* shell_proc_alloc(const char* line) {
   for (int i = 0; i < SHELL_MAX_PROCS; ++i) {
     ShellProc* p = &g_procs[i];
     if (!p->in_use) {
@@ -43,8 +43,7 @@ static ShellProc* shell_proc_alloc(const char* line)
   return NULL;  // 没空位
 }
 
-static void shell_proc_free(ShellProc* p)
-{
+static void shell_proc_free(ShellProc* p) {
   if (!p) return;
   p->in_use  = 0;
   p->line[0] = '\0';
@@ -55,8 +54,7 @@ static void shell_proc_free(ShellProc* p)
 /* -------------------------------------------------------------------------- */
 
 /* 简单十进制 atoi（支持可选的 '+'/'-' 前缀，不做错误检查） */
-static int shell_atoi(const char* s)
-{
+static int shell_atoi(const char* s) {
   int neg = 0;
   int val = 0;
 
@@ -80,8 +78,7 @@ static int shell_atoi(const char* s)
 #define SHELL_READ_INTR -2 /* 被 Ctrl-C 中断 */
 #define SHELL_READ_ERR  -1 /* 其他错误 */
 
-static int shell_read_line(char* line, int line_size)
-{
+static int shell_read_line(char* line, int line_size) {
   int len = u_gets(line, line_size);
   if (len == U_GETS_INTR) {
     return SHELL_READ_INTR;
@@ -96,8 +93,7 @@ static int shell_read_line(char* line, int line_size)
 }
 
 /* 把一行按空白拆成 argv[]，原地在 line 里插入 '\0' 作为分隔 */
-static int shell_parse_line(char* line, char** argv, int max_args)
-{
+static int shell_parse_line(char* line, char** argv, int max_args) {
   int argc = 0;
   char* p  = line;
 
@@ -134,8 +130,7 @@ static int shell_parse_line(char* line, char** argv, int max_args)
 /* 命令表定义                                                                 */
 /* -------------------------------------------------------------------------- */
 
-static const char* thread_state_name(int s)
-{
+static const char* thread_state_name(int s) {
   switch (s) {
     case THREAD_UNUSED:
       return "UNUSED";
@@ -175,27 +170,28 @@ static void cmd_kill(int argc, char** argv);
 static void cmd_date(int argc, char** argv);
 static void cmd_uptime(int argc, char** argv);
 static void cmd_irqstat(int argc, char** argv);
+static void cmd_spawn(int argc, char** argv);
 
 /* 命令表 */
 static const shell_cmd_t g_shell_cmds[] = {
-    {"help",    cmd_help,    "show this help",               1},
-    {"echo",    cmd_echo,    "echo arguments",               1}, // 也可以设成 0，看你喜好
-    {"sleep",   cmd_sleep,   "sleep <ticks> (thread sleep)", 0},
-    {"ps",      cmd_ps,      "list threads",                 1},
-    {"jobs",    cmd_jobs,    "list user threads",            1},
-    {"kill",    cmd_kill,    "kill <tid>",                   1},
-    {"date",    cmd_date,    "date",                         0},
-    {"uptime",  cmd_uptime,  "uptime",                       0},
-    {"irqstat", cmd_irqstat, "irqstat",                      0},
-    {"exit",    cmd_exit,    "exit shell",                   1},
+    {"help",    cmd_help,    "show this help",                                  1},
+    {"echo",    cmd_echo,    "echo arguments",                                  1}, // 也可以设成 0，看你喜好
+    {"sleep",   cmd_sleep,   "sleep <ticks> (thread sleep)",                    0},
+    {"ps",      cmd_ps,      "list threads",                                    1},
+    {"jobs",    cmd_jobs,    "list user threads",                               1},
+    {"kill",    cmd_kill,    "kill <tid>",                                      1},
+    {"date",    cmd_date,    "date",                                            0},
+    {"uptime",  cmd_uptime,  "uptime",                                          0},
+    {"irqstat", cmd_irqstat, "irqstat",                                         0},
+    {"spawn",   cmd_spawn,   "spawn test threads (spin/yield/sleep/list/kill)", 1},
+    {"exit",    cmd_exit,    "exit shell",                                      1},
 };
 
 static const int g_shell_cmd_count =
     (int)(sizeof(g_shell_cmds) / sizeof(g_shell_cmds[0]));
 
 /* 查找命令 */
-static const shell_cmd_t* shell_find_cmd(const char* name)
-{
+static const shell_cmd_t* shell_find_cmd(const char* name) {
   for (int i = 0; i < g_shell_cmd_count; ++i) {
     if (u_strcmp(name, g_shell_cmds[i].name) == 0) {
       return &g_shell_cmds[i];
@@ -208,8 +204,7 @@ static const shell_cmd_t* shell_find_cmd(const char* name)
 /* 命令实现                                                                   */
 /* -------------------------------------------------------------------------- */
 
-static void cmd_help(int argc, char** argv)
-{
+static void cmd_help(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -219,8 +214,7 @@ static void cmd_help(int argc, char** argv)
   }
 }
 
-static void cmd_echo(int argc, char** argv)
-{
+static void cmd_echo(int argc, char** argv) {
   if (argc <= 1) {
     u_puts(""); /* 输出一个空行 */
     return;
@@ -231,8 +225,7 @@ static void cmd_echo(int argc, char** argv)
   }
 }
 
-static void cmd_sleep(int argc, char** argv)
-{
+static void cmd_sleep(int argc, char** argv) {
   if (argc < 2) {
     u_puts("usage: sleep <ticks>");
     return;
@@ -249,8 +242,7 @@ static void cmd_sleep(int argc, char** argv)
   u_puts("done.");
 }
 
-static void cmd_exit(int argc, char** argv)
-{
+static void cmd_exit(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -258,8 +250,7 @@ static void cmd_exit(int argc, char** argv)
   thread_exit(0); /* 不会返回 */
 }
 
-static void cmd_ps(int argc, char** argv)
-{
+static void cmd_ps(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -270,21 +261,25 @@ static void cmd_ps(int argc, char** argv)
     return;
   }
 
-  u_printf(" TID  STATE     MODE  EXIT   NAME\n");
-  u_printf(" ---- --------- ----  ----- ------------\n");
+  u_printf(" TID  STATE     MODE  CPU  EXIT   NAME\n");
+  u_printf(" ---- --------- ----  ---  ----- ------------\n");
 
   for (int i = 0; i < n; ++i) {
     const struct u_thread_info* ti = &infos[i];
     const char* st                 = thread_state_name(ti->state);
     char mode                      = ti->is_user ? 'U' : 'S';
 
-    u_printf(" %-4d %-9s  %c   %5d %s\n", ti->tid, st, mode, ti->exit_code,
-             ti->name);
+    if (ti->cpu >= 0) {
+      u_printf(" %-4d %-9s  %c   %-4d %5d %s\n", ti->tid, st, mode, ti->cpu,
+               ti->exit_code, ti->name);
+    } else {
+      u_printf(" %-4d %-9s  %c   --- %5d %s\n", ti->tid, st, mode,
+               ti->exit_code, ti->name);
+    }
   }
 }
 
-static void cmd_jobs(int argc, char** argv)
-{
+static void cmd_jobs(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -309,8 +304,7 @@ static void cmd_jobs(int argc, char** argv)
   }
 }
 
-static void cmd_kill(int argc, char** argv)
-{
+static void cmd_kill(int argc, char** argv) {
   if (argc < 2) {
     u_puts("usage: kill <tid>");
     return;
@@ -338,8 +332,7 @@ static void cmd_kill(int argc, char** argv)
   }
 }
 
-static void cmd_date(int argc, char** argv)
-{
+static void cmd_date(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -356,8 +349,7 @@ static void cmd_date(int argc, char** argv)
            dt.hour, dt.min, dt.sec);
 }
 
-static void cmd_uptime(int argc, char** argv)
-{
+static void cmd_uptime(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -370,8 +362,7 @@ static void cmd_uptime(int argc, char** argv)
            (unsigned long long)ts.tv_sec, (unsigned)ts.tv_nsec);
 }
 
-static void cmd_irqstat(int argc, char** argv)
-{
+static void cmd_irqstat(int argc, char** argv) {
   (void)argc;
   (void)argv;
 
@@ -399,12 +390,15 @@ static void cmd_irqstat(int argc, char** argv)
   }
 }
 
+static void cmd_spawn(int argc, char** argv) {
+  spawn(argc, argv);
+}
+
 /* -------------------------------------------------------------------------- */
 /* shell 主循环                                                               */
 /* -------------------------------------------------------------------------- */
 
-static void __attribute__((noreturn)) shell_cmd_worker(void* arg)
-{
+static void __attribute__((noreturn)) shell_cmd_worker(void* arg) {
   ShellProc* proc = (ShellProc*)arg;
 
   /* 1. 拷一份到自己的栈上，避免直接在全局 buffer 上原地改 */
@@ -450,8 +444,7 @@ static void __attribute__((noreturn)) shell_cmd_worker(void* arg)
  *   - >=0: 子线程的 exit_code
  *   - < 0: 表示创建/等待过程中出错（不是命令返回值）
  */
-static int shell_run_command(const char* line)
-{
+static int shell_run_command(const char* line) {
   ShellProc* proc = shell_proc_alloc(line);
   if (!proc) {
     u_puts("shell: no free proc slot (too many concurrent commands)");
@@ -478,8 +471,7 @@ static int shell_run_command(const char* line)
   return status;  // 类似 waitpid 拿到的 WEXITSTATUS
 }
 
-static void shell_dispatch_line(char* line)
-{
+static void shell_dispatch_line(char* line) {
   /* 先解析成 argv，用来识别 builtin */
   char raw_line[SHELL_MAX_LINE];
 
@@ -515,8 +507,7 @@ static void shell_dispatch_line(char* line)
   // 有需要的话可以在这里根据 status 做额外处理/打印
 }
 
-static void shell_main_loop(void)
-{
+static void shell_main_loop(void) {
   char line[SHELL_MAX_LINE];
 
   u_puts("tiny shell started. type 'help' for commands.");
@@ -547,16 +538,14 @@ static void shell_main_loop(void)
 /* 对外 API                                                                   */
 /* -------------------------------------------------------------------------- */
 
-void shell_thread(void* arg)
-{
+void shell_thread(void* arg) {
   (void)arg;
   shell_main_loop();
   /* 理论上不会到这里，shell_exit 会调用 thread_exit() */
   thread_exit(0);
 }
 
-tid_t shell_start(void)
-{
+tid_t shell_start(void) {
   /* 在用户态创建一个 shell 线程 */
   tid_t tid = thread_create(shell_thread, NULL, "shell");
   if (tid < 0) {

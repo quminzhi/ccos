@@ -2,11 +2,12 @@
 #include <stddef.h>
 
 #include "thread.h"
-#include "thread_sys.h"
+#include "uthread.h"
 #include "trap.h"
 #include "log.h"
 #include "platform.h"
 #include "riscv_csr.h"
+#include "cpu.h"
 
 extern tid_t g_stdin_waiter;
 void *memset(void *s, int c, size_t n); /* string.h */
@@ -16,59 +17,43 @@ void arch_first_switch(struct trapframe *tf);
 /* Configuration check                                                        */
 /* -------------------------------------------------------------------------- */
 
-#if THREAD_MAX < 2
-#error "THREAD_MAX must be at least 2 (for idle + kernel main)"
+#if THREAD_MAX <= MAX_HARTS
+#error "THREAD_MAX must be at least MAX_HARTS + 1 (for idle + kernel main)"
 #endif
 
 #define USER_THREAD 1
 #define KERN_THREAD 0
 
+#define FIRST_TID   MAX_HARTS /* [0,MAX_HARTS-1] for idle of each CPU */
+
 /* -------------------------------------------------------------------------- */
 /* Types & globals                                                            */
 /* -------------------------------------------------------------------------- */
 
-typedef struct Thread {
-  tid_t id;
-  ThreadState state;
-  uint64_t wakeup_tick; /* SLEEPING 时的唤醒 tick（绝对时间） */
-  const char *name;
-  int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
-  int can_be_killed;
-
-  struct trapframe tf; /* 保存的寄存器上下文 */
-
-  uint8_t *stack_base; /* 栈底（main 用 boot 栈 -> NULL） */
-
-  /* exit / join 相关 */
-  int exit_code;             /* thread_exit(exit_code) 保存的值 */
-  tid_t join_waiter;         /* 有谁在 join 我？（-1 表示没有） */
-  tid_t waiting_for;         /* 我在 join 谁？（仅 WAITING 时有用） */
-  uintptr_t join_status_ptr; /* join 时传入的 int*，保存 exit_code 用 */
-
-  /* 用于阻塞式 read 的上下文（最小版本：只支持一个 read 请求） */
-  uintptr_t pending_read_buf; /* 用户传来的 buf 指针 */
-  uint64_t pending_read_len;  /* 用户传来的 len      */
-} Thread;
-
-static Thread g_threads[THREAD_MAX];
+Thread g_threads[THREAD_MAX];
 static uint8_t g_thread_stacks[THREAD_MAX][THREAD_STACK_SIZE];
 
-static tid_t g_current_tid = 0;
-static uint64_t g_ticks    = 0;
-
 static void idle_main(void *arg) __attribute__((noreturn));
+
+static uint64_t g_ticks = 0;
 
 /* -------------------------------------------------------------------------- */
 /* Internal helpers                                                           */
 /* -------------------------------------------------------------------------- */
 
-static inline void tf_clear(struct trapframe *tf)
-{
+static inline tid_t current_tid_get(void) {
+  return (tid_t)cpu_this()->current_tid;
+}
+
+static inline void current_tid_set(tid_t tid) {
+  cpu_this()->current_tid = (int)tid;
+}
+
+static inline void tf_clear(struct trapframe *tf) {
   memset(tf, 0, sizeof(*tf));
 }
 
-static inline Thread *thread_by_tid(tid_t tid)
-{
+static inline Thread *thread_by_tid(tid_t tid) {
   if (tid < 0 || tid >= THREAD_MAX) {
     return NULL;
   }
@@ -76,8 +61,7 @@ static inline Thread *thread_by_tid(tid_t tid)
 }
 
 /* 找空闲 slot（1 开始：0 idle 保留） */
-static tid_t alloc_thread_slot(void)
-{
+static tid_t alloc_thread_slot(void) {
   for (int i = 1; i < THREAD_MAX; ++i) {
     if (g_threads[i].state == THREAD_UNUSED) {
       return i;
@@ -86,8 +70,7 @@ static tid_t alloc_thread_slot(void)
   return -1;
 }
 
-static void init_thread_context_s(Thread *t, thread_entry_t entry, void *arg)
-{
+static void init_thread_context_s(Thread *t, thread_entry_t entry, void *arg) {
   struct trapframe *tf = &t->tf;
 
   tf_clear(tf);
@@ -106,8 +89,7 @@ static void init_thread_context_s(Thread *t, thread_entry_t entry, void *arg)
   tf->sstatus = s;
 }
 
-static void init_thread_context_u(Thread *t, thread_entry_t entry, void *arg)
-{
+static void init_thread_context_u(Thread *t, thread_entry_t entry, void *arg) {
   struct trapframe *tf = &t->tf;
   tf_clear(tf);
 
@@ -127,8 +109,7 @@ static void init_thread_context_u(Thread *t, thread_entry_t entry, void *arg)
 }
 
 /* idle 线程：简单 busy loop */
-static void idle_main(void *arg)
-{
+static void idle_main(void *arg) {
   (void)arg;
 
   for (;;) {
@@ -137,8 +118,7 @@ static void idle_main(void *arg)
 }
 
 /* 回收已经被 join 的线程（把 slot 变回 UNUSED） */
-static void recycle_thread(tid_t tid)
-{
+static void recycle_thread(tid_t tid) {
   if (tid <= 0 || tid >= THREAD_MAX) {
     return; /* 不回收 idle/main */
   }
@@ -155,15 +135,53 @@ static void recycle_thread(tid_t tid)
   /* 栈数组 g_thread_stacks[tid] 保留复用 */
 }
 
+static char s_idle_names[MAX_HARTS][16];
+
+static const char *idle_name_for_hart(uint32_t hartid) {
+  // 生成 "idleX"
+  // 不依赖 snprintf，避免 freestanding 环境问题
+  char *p    = s_idle_names[hartid];
+  p[0]       = 'i';
+  p[1]       = 'd';
+  p[2]       = 'l';
+  p[3]       = 'e';
+
+  // 简单十进制
+  uint32_t x = hartid;
+  char tmp[10];
+  int n = 0;
+  do {
+    tmp[n++] = (char)('0' + (x % 10));
+    x /= 10;
+  } while (x && n < (int)sizeof(tmp));
+
+  int k = 4;
+  for (int i = n - 1; i >= 0; --i) {
+    p[k++] = tmp[i];
+  }
+  p[k] = '\0';
+  return p;
+}
+
+static tid_t thread_create_user(thread_entry_t entry, void *arg,
+                                const char *name);
+
+static tid_t thread_create_user_main(thread_entry_t user_main, void *arg) {
+  tid_t tid = thread_create_user(user_main, arg, "user_main");
+  if (tid < 0) {
+    pr_err("no slot for user_main\n");
+  }
+  return tid;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Public API                                                                 */
 /* -------------------------------------------------------------------------- */
 
-/* Initialization and configure S-mode idle (tid = 0) */
-void threads_init(void)
-{
-  g_ticks       = 0;
-  g_current_tid = 1; /* main 线程假定为 tid=1 */
+/* Initialization and configure S-mode idle for each hart and prepare user main
+ */
+void threads_init(thread_entry_t user_main) {
+  g_ticks = 0;
 
   for (int i = 0; i < THREAD_MAX; ++i) {
     g_threads[i].id               = i;
@@ -181,17 +199,25 @@ void threads_init(void)
     tf_clear(&g_threads[i].tf);
   }
 
-  /* tid 0: idle (S-mode) */
-  Thread *idle     = &g_threads[0];
-  idle->state      = THREAD_RUNNABLE;
-  idle->name       = "idle";
-  idle->stack_base = g_thread_stacks[0];
-  init_thread_context_s(idle, idle_main, NULL);
+  // prepare idle thread (idle tid = hartid)
+  for (uint32_t hid = 0; hid < (uint32_t)MAX_HARTS; ++hid) {
+    Thread *idle        = &g_threads[hid];
+    idle->state         = THREAD_RUNNABLE;
+    idle->name          = idle_name_for_hart(hid);
+    idle->stack_base    = g_thread_stacks[hid];
+    idle->is_user       = KERN_THREAD;
+    idle->can_be_killed = 0;
+
+    init_thread_context_s(idle, idle_main, (void *)(uintptr_t)hid);
+  }
+
+  // create thread for user main
+  tid_t user_main_tid = thread_create_user_main(user_main, NULL);
+  ASSERT(user_main_tid == FIRST_TID);
 }
 
 /* 创建新线程：返回 tid，失败返回 -1 */
-tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name)
-{
+tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name) {
   if (!entry) {
     pr_info("thread_create: entry is NULL\n");
     return -1;
@@ -221,8 +247,7 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name)
 }
 
 static tid_t thread_create_user(thread_entry_t entry, void *arg,
-                                const char *name)
-{
+                                const char *name) {
   tid_t tid = alloc_thread_slot();
 
   if (tid < 0) {
@@ -242,27 +267,8 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
   return tid;
 }
 
-// "exec"
-tid_t thread_exec(thread_entry_t user_main, void *arg)
-{
-  tid_t tid = thread_create_user(user_main, arg, "user_main");
-  if (tid < 0) {
-    pr_err("no slot for user_main\n");
-  }
-
-  g_current_tid    = tid;
-  Thread *t        = &g_threads[tid];
-  t->can_be_killed = 0;
-  arch_first_switch(&t->tf);  // 不会返回
-
-  for (;;) {
-    __asm__ volatile("wfi");
-  }
-}
-
 /* 每个 timer tick 调用：更新 SLEEPING -> RUNNABLE */
-void threads_tick(void)
-{
+void threads_tick(void) {
   g_ticks++;
 
   for (int i = 0; i < THREAD_MAX; ++i) {
@@ -274,45 +280,58 @@ void threads_tick(void)
   }
 }
 
-/* 调度器：保存当前 tf，选下一个 RUNNABLE，恢复它的 tf */
-void schedule(struct trapframe *tf)
-{
-  Thread *cur = &g_threads[g_current_tid];
+struct trapframe *schedule(struct trapframe *tf) {
+  cpu_t *c      = cpu_this();
+  tid_t cur_tid = c->current_tid;
+  Thread *cur   = &g_threads[cur_tid];
 
-  /* 保存当前上下文 */
-  cur->tf     = *tf;
-  if (cur->state == THREAD_RUNNING) {
-    cur->state = THREAD_RUNNABLE;
-  }
+  ASSERT(tf == cpu_this()->cur_tf);
 
-  /* 简单 round-robin */
+  if (cur->state == THREAD_RUNNING) cur->state = THREAD_RUNNABLE;
+
   tid_t next_tid = -1;
-  int start      = g_current_tid;
 
-  for (int i = 1; i <= THREAD_MAX; ++i) {
-    int cand = (start + i) % THREAD_MAX;
+  for (int off = 1; off < THREAD_MAX; ++off) {
+    tid_t cand = (cur_tid + off) % THREAD_MAX;
+    if (cand < FIRST_TID) continue;  // 跳过 idle tids
     if (g_threads[cand].state == THREAD_RUNNABLE) {
       next_tid = cand;
       break;
     }
   }
 
+  // 如果当前就是普通线程，就继续跑它
   if (next_tid < 0) {
-    next_tid = 0; /* 退回 idle */
+    if (cur_tid >= FIRST_TID && cur->state == THREAD_RUNNABLE) {
+      next_tid = cur_tid;
+    } else {
+      next_tid = c->idle_tid;
+    }
   }
 
-  g_current_tid = next_tid;
-  Thread *next  = &g_threads[next_tid];
-  next->state   = THREAD_RUNNING;
+  if (next_tid >= FIRST_TID) {
+    int old = g_threads[next_tid].running_hart;
+    if (old != -1 && old != (int)c->hartid) {
+      pr_info("tid=%d migrated %d -> %u", (int)next_tid, old, c->hartid);
+    }
+    g_threads[next_tid].running_hart = (int)c->hartid;
+  }
 
-  *tf           = next->tf;
+  if (next_tid != cur_tid) c->ctx_switches++;
+  c->current_tid = next_tid;
+
+  Thread *next   = &g_threads[next_tid];
+  next->state    = THREAD_RUNNING;
+
+  c->cur_tf      = &next->tf;
+  return c->cur_tf;
 }
 
-void thread_block(struct trapframe *tf)
-{
-  Thread *cur = &g_threads[g_current_tid];
+void thread_block(struct trapframe *tf) {
+  tid_t cur_tid = current_tid_get();
+  Thread *cur   = &g_threads[cur_tid];
 
-  cur->state  = THREAD_BLOCKED;
+  cur->state    = THREAD_BLOCKED;
   schedule(tf);
 
   /* 注意：
@@ -322,8 +341,7 @@ void thread_block(struct trapframe *tf)
    */
 }
 
-void thread_wake(tid_t tid)
-{
+void thread_wake(tid_t tid) {
   if (tid < 0 || tid >= THREAD_MAX) {
     return;
   }
@@ -337,9 +355,9 @@ void thread_wake(tid_t tid)
 /* Sleep / syscalls (kernel side)                                             */
 /* -------------------------------------------------------------------------- */
 
-void thread_sys_sleep(struct trapframe *tf, uint64_t ticks)
-{
-  Thread *cur = &g_threads[g_current_tid];
+void thread_sys_sleep(struct trapframe *tf, uint64_t ticks) {
+  tid_t cur_tid = current_tid_get();
+  Thread *cur   = &g_threads[cur_tid];
 
   if (ticks == 0) {
     /* sleep(0) = yield：不改状态，但交给调度器切一次 */
@@ -353,17 +371,20 @@ void thread_sys_sleep(struct trapframe *tf, uint64_t ticks)
   schedule(tf);
 }
 
+void thread_sys_yield(struct trapframe *tf) {
+  thread_sys_sleep(tf, 0);
+}
+
 void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
-                       const char *name)
-{
+                       const char *name) {
   tid_t tid = thread_create_user(entry, arg, name);
   tf->a0    = (uintptr_t)tid;  // 返回 tid 给用户态
 }
 
-void thread_sys_exit(struct trapframe *tf, int exit_code)
-{
-  Thread *cur    = &g_threads[g_current_tid];
-  tid_t self_tid = g_current_tid;
+void thread_sys_exit(struct trapframe *tf, int exit_code) {
+  tid_t cur_tid  = current_tid_get();
+  Thread *cur    = &g_threads[cur_tid];
+  tid_t self_tid = cur_tid;
   tid_t joiner   = cur->join_waiter;
 
   /* 保存当前上下文（主要为了调试 / backtrace） */
@@ -406,16 +427,16 @@ void thread_sys_exit(struct trapframe *tf, int exit_code)
  *  - status_ptr: 用户传入的 int*（可以为 0）
  */
 void thread_sys_join(struct trapframe *tf, tid_t target_tid,
-                     uintptr_t status_ptr)
-{
-  Thread *cur = &g_threads[g_current_tid];
+                     uintptr_t status_ptr) {
+  tid_t cur_tid = current_tid_get();
+  Thread *cur   = &g_threads[cur_tid];
 
   /* 一些基本检查 */
   if (target_tid <= 0 || target_tid >= THREAD_MAX) {
     tf->a0 = -1; /* EINVAL */
     return;
   }
-  if (target_tid == g_current_tid) {
+  if (target_tid == cur_tid) {
     tf->a0 = -2; /* EDEADLK: 自己 join 自己 */
     return;
   }
@@ -439,7 +460,7 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
   }
 
   /* 目标还有别的 joiner？简化起见：一次只允许一个 joiner */
-  if (t->join_waiter >= 0 && t->join_waiter != g_current_tid) {
+  if (t->join_waiter >= 0 && t->join_waiter != cur_tid) {
     tf->a0 = -4; /* EBUSY: 已有其它线程在 join 它 */
     return;
   }
@@ -450,7 +471,7 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
   cur->waiting_for     = target_tid;
   cur->join_status_ptr = status_ptr;
 
-  t->join_waiter       = g_current_tid;
+  t->join_waiter       = cur_tid;
 
   /* 阻塞当前线程，切换到其它线程。
    *
@@ -462,8 +483,7 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
   schedule(tf);
 }
 
-int thread_sys_list(struct u_thread_info *ubuf, int max)
-{
+int thread_sys_list(struct u_thread_info *ubuf, int max) {
   if (!ubuf || max <= 0) {
     return -1;  // EINVAL
   }
@@ -479,7 +499,13 @@ int thread_sys_list(struct u_thread_info *ubuf, int max)
     dst->is_user              = t->is_user ? 1 : 0;
     dst->exit_code            = t->exit_code;
 
-    int j                     = 0;
+    if (t->id < FIRST_TID) {
+      dst->cpu = t->id;  // idle tid == hartid
+    } else {
+      dst->cpu = t->running_hart;
+    }
+
+    int j = 0;
     if (t->name) {
       while (t->name[j] && j < (int)sizeof(dst->name) - 1) {
         dst->name[j] = t->name[j];
@@ -492,8 +518,8 @@ int thread_sys_list(struct u_thread_info *ubuf, int max)
   return count;
 }
 
-void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
-{
+void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
+  tid_t cur_tid = current_tid_get();
   /* 基本检查 */
   if (target_tid < 0 || target_tid >= THREAD_MAX) {
     tf->a0 = -1;  // EINVAL
@@ -505,7 +531,7 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
     return;
   }
 
-  if (target_tid == g_current_tid) {
+  if (target_tid == cur_tid) {
     tf->a0 = -4;  // 不允许通过 kill 自杀（让用户态用 thread_exit）
     return;
   }
@@ -567,10 +593,11 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid)
 /* Introspection                                                              */
 /* -------------------------------------------------------------------------- */
 
-tid_t thread_current(void) { return g_current_tid; }
+tid_t thread_current(void) {
+  return current_tid_get();
+}
 
-const char *thread_name(tid_t tid)
-{
+const char *thread_name(tid_t tid) {
   Thread *t = thread_by_tid(tid);
   if (!t) {
     return "?";
@@ -578,8 +605,7 @@ const char *thread_name(tid_t tid)
   return t->name;
 }
 
-void print_thread_prefix(void)
-{
+void print_thread_prefix(void) {
   tid_t tid        = thread_current();
   const char *name = thread_name(tid);
   char mode        = g_threads[tid].is_user ? 'U' : 'S';
@@ -593,8 +619,7 @@ void print_thread_prefix(void)
   platform_puts("] ");
 }
 
-void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf)
-{
+void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf) {
   /* 没数据：登记 read 上下文，并 block 当前线程 */
   Thread *cur           = &g_threads[thread_current()];
 
@@ -606,8 +631,7 @@ void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf)
   thread_block(tf);
 }
 
-void thread_read_from_stdin(console_reader_t read)
-{
+void thread_read_from_stdin(console_reader_t read) {
   Thread *t = &g_threads[g_stdin_waiter];
 
   if (t->pending_read_buf == 0 || t->pending_read_len == 0) {

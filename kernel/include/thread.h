@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "trap.h"
-#include "thread_sys.h"
+#include "uthread.h"
 
 /* -------------------------------------------------------------------------- */
 /* Config                                                                     */
@@ -22,26 +22,51 @@
 
 #define DELTA_TICKS 1000000UL /* ~0.1s */
 
+// #define DELTA_TICKS 10000000UL /* ~1s */
+
+typedef struct Thread {
+  tid_t id;
+  ThreadState state;
+  uint64_t wakeup_tick; /* SLEEPING 时的唤醒 tick（绝对时间） */
+  const char *name;
+  int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
+  int can_be_killed;
+
+  struct trapframe tf; /* 保存的寄存器上下文 */
+
+  uint8_t *stack_base; /* 栈底（main 用 boot 栈 -> NULL） */
+
+  /* exit / join 相关 */
+  int exit_code;             /* thread_exit(exit_code) 保存的值 */
+  tid_t join_waiter;         /* 有谁在 join 我？（-1 表示没有） */
+  tid_t waiting_for;         /* 我在 join 谁？（仅 WAITING 时有用） */
+  uintptr_t join_status_ptr; /* join 时传入的 int*，保存 exit_code 用 */
+
+  /* 用于阻塞式 read 的上下文（最小版本：只支持一个 read 请求） */
+  uintptr_t pending_read_buf; /* 用户传来的 buf 指针 */
+  uint64_t pending_read_len;  /* 用户传来的 len      */
+
+  int running_hart;  // -1 or hartid
+} Thread;
+
 /* -------------------------------------------------------------------------- */
 /* Core thread API                                                            */
 /* -------------------------------------------------------------------------- */
+
+extern Thread g_threads[THREAD_MAX];
 
 /* 初始化线程子系统：
  *  - tid 0: idle 线程
  *  - tid 1: main 线程（当前正在运行）
  */
-void threads_init(void);
+void threads_init(thread_entry_t user_main);
+void cpu_enter_idle(uint32_t hartid) __attribute__((noreturn));
 
 tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name);
 
-/* start first user main */
-tid_t thread_exec(thread_entry_t entry, void *arg);
-
-/* 每个 timer tick 调用一次（通常在定时器中断里） */
 void threads_tick(void);
 
-/* 核心调度函数：在 trap 中切换当前线程 */
-void schedule(struct trapframe *tf);
+struct trapframe *schedule(struct trapframe *tf);
 
 void thread_block(struct trapframe *tf);
 void thread_wake(tid_t tid);
@@ -54,6 +79,7 @@ void thread_wake(tid_t tid);
  *  - 处理 SYS_SLEEP：把当前线程标记为 SLEEPING，并 schedule。
  */
 void thread_sys_sleep(struct trapframe *tf, uint64_t ticks);
+void thread_sys_yield(struct trapframe *tf);
 
 /* trap_handler 用：
  *  - 处理 SYS_THREAD_EXIT：把当前线程标记为 ZOMBIE，唤醒 joiner。

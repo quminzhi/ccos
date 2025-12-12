@@ -1,10 +1,9 @@
 #include "sysfile.h"
 #include <console.h>
-#include "syscall.h"
 #include "thread.h"
 #include "time.h"
 #include "platform.h"
-#include "time_sys.h"
+#include "utime.h"
 
 extern tid_t g_stdin_waiter;
 

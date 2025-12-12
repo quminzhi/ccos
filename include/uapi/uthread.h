@@ -1,9 +1,9 @@
-// thread_sys.h （shared by user and kernel）
+// uthread.h （shared by user and kernel）
 
 #pragma once
 #include <stdint.h>
+#include "types.h"
 
-typedef int tid_t; /* 线程 ID = g_threads[] 的 index      */
 typedef void (*thread_entry_t)(void *arg) __attribute__((noreturn));
 tid_t thread_current(void);
 
@@ -27,7 +27,10 @@ enum {
 struct u_thread_info {
   int tid;
   int state;
-  int is_user;  // 0=S, 1=U
+  int is_user;
   int exit_code;
-  char name[16];  // 简单拷贝前 15 字符，结尾 '\0'
+  char name[32];
+
+  int cpu;   // NEW: -1 = not running, >=0 = running on that hart
 };
+

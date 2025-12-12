@@ -62,7 +62,7 @@ void primary_main(long hartid, long dtb_pa) {
   log_init_baremetal();
 
   time_init();
-  threads_init();
+  threads_init(user_main);
 
   set_smp_boot_done();
   start_other_harts(dtb_pa);
@@ -71,12 +71,12 @@ void primary_main(long hartid, long dtb_pa) {
   arch_enable_external_interrupts();
 
   platform_timer_start_after(DELTA_TICKS);
-  // platform_rtc_set_alarm_after(3ULL * 1000 * 1000 * 1000);
 
   pr_info("Kernel built as %s, CPUS=%d, Boot Hart=%ld", KERNEL_BUILD_TYPE,
           MAX_HARTS, (long)hartid);
-  pr_info("system init done, starting user main...");
-  thread_exec(user_main, NULL);
+  pr_info("Boot Hart: system init done.");
+
+  cpu_enter_idle(hartid);
 
   for (;;) {
     __asm__ volatile("wfi");
@@ -90,10 +90,19 @@ void secondary_main(long hartid, long dtb_pa) {
   platform_secondary_hart_init(hartid);
   trap_init();
 
-  // 开timer就参与调度了，除非注册自己的timer handler
+  arch_enable_timer_interrupts();
+  arch_enable_external_interrupts();
+
+  // TODO: platform_timer_start_after()，记得要按 hart 配 timer
+  platform_timer_start_after(DELTA_TICKS);
 
   pr_info("hart %ld online (secondary)", cpu_current_hartid());
+  cpu_enter_idle((uint32_t)hartid);
 
+  // TODO: 用 IPI（软件中断）做 resched（更省电、更像现代 OS）
+  // - secondary 在 idle 里 wfi
+  // - 当 boot hart/任意 hart 把某线程变成 RUNNABLE 时，发一个 IPI 给某个空闲
+  // hart，让它从 wfi 醒来进入 schedule
   for (;;) {
     __asm__ volatile("wfi");
   }

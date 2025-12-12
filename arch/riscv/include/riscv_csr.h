@@ -34,23 +34,19 @@ typedef uint64_t reg_t;
  * 注：虽然名字叫 mcause_*，但对 scause 也同样适用，
  *     因为编码格式完全一致（MSB=1 表示中断，低位 code 相同）。
  */
-static inline int mcause_is_interrupt(reg_t mcause)
-{
+static inline int mcause_is_interrupt(reg_t mcause) {
   return (mcause & MCAUSE_INT) != 0;
 }
 
-static inline reg_t mcause_code(reg_t mcause)
-{
+static inline reg_t mcause_code(reg_t mcause) {
   return (mcause & MCAUSE_CODE_MASK);
 }
 
-static inline int scause_is_interrupt(reg_t scause)
-{
+static inline int scause_is_interrupt(reg_t scause) {
   return (scause & SCAUSE_INT) != 0;
 }
 
-static inline reg_t scause_code(reg_t scause)
-{
+static inline reg_t scause_code(reg_t scause) {
   return (scause & SCAUSE_CODE_MASK);
 }
 
@@ -199,6 +195,16 @@ enum {
     uintptr_t __m = (uintptr_t)(mask);                                 \
     __asm__ __volatile__("csrs " #csr ", %0" : : "r"(__m) : "memory"); \
   } while (0)
+
+static inline reg_t csr_read_sscratch(void) {
+  reg_t x;
+  __asm__ volatile("csrr %0, sscratch" : "=r"(x));
+  return x;
+}
+
+static inline void csr_write_sscratch(reg_t x) {
+  __asm__ volatile("csrw sscratch, %0" ::"r"(x) : "memory");
+}
 
 /* mtvec 低 2 bit 是 mode */
 

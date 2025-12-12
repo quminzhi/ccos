@@ -1,4 +1,5 @@
 #include "syscall.h"
+#include "usyscall.h"
 
 uint64_t write(int fd, const void *buf, uint64_t len)
 {
@@ -117,4 +118,15 @@ long irq_get_stats(struct irqstat_user *buf, size_t n)
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
 
   return (long)a0;  // 返回实际写入的条数（<0 表示错误）
+}
+
+int get_hartid(void) {
+  register long a0 asm("a0") = SYS_GET_HARTID;
+  asm volatile("ecall" : "+r"(a0) : : "memory");
+  return (int)a0;
+}
+
+void yield() {
+  register long a0 asm("a0") = SYS_YIELD;
+  asm volatile("ecall" : "+r"(a0) : : "memory");
 }
