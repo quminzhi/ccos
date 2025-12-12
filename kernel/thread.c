@@ -310,10 +310,10 @@ struct trapframe *schedule(struct trapframe *tf) {
   }
 
   if (next_tid >= FIRST_TID) {
-    int old = g_threads[next_tid].running_hart;
-    if (old != -1 && old != (int)c->hartid) {
-      pr_info("tid=%d migrated %d -> %u", (int)next_tid, old, c->hartid);
-    }
+    // int old = g_threads[next_tid].running_hart;
+    // if (old != -1 && old != (int)c->hartid) {
+    //   pr_info("tid=%d migrated %d -> %u", (int)next_tid, old, c->hartid);
+    // }
     g_threads[next_tid].running_hart = (int)c->hartid;
   }
 

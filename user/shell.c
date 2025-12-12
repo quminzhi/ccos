@@ -4,7 +4,8 @@
 #include "uthread.h"
 #include "utime.h"
 #include "datetime.h"
-#include"spawn.h"
+#include "spawn.h"
+#include "monitor.h"
 
 /* -------------------------------------------------------------------------- */
 /* 配置                                                                       */
@@ -130,25 +131,6 @@ static int shell_parse_line(char* line, char** argv, int max_args) {
 /* 命令表定义                                                                 */
 /* -------------------------------------------------------------------------- */
 
-static const char* thread_state_name(int s) {
-  switch (s) {
-    case THREAD_UNUSED:
-      return "UNUSED";
-    case THREAD_RUNNABLE:
-      return "RUNNABLE";
-    case THREAD_RUNNING:
-      return "RUNNING";
-    case THREAD_SLEEPING:
-      return "SLEEP";
-    case THREAD_WAITING:
-      return "WAIT";
-    case THREAD_ZOMBIE:
-      return "ZOMBIE";
-    default:
-      return "?";
-  }
-}
-
 typedef void (*shell_cmd_fn)(int argc, char** argv);
 
 typedef struct {
@@ -171,6 +153,7 @@ static void cmd_date(int argc, char** argv);
 static void cmd_uptime(int argc, char** argv);
 static void cmd_irqstat(int argc, char** argv);
 static void cmd_spawn(int argc, char** argv);
+static void cmd_mon(int argc, char** argv);
 
 /* 命令表 */
 static const shell_cmd_t g_shell_cmds[] = {
@@ -184,6 +167,10 @@ static const shell_cmd_t g_shell_cmds[] = {
     {"uptime",  cmd_uptime,  "uptime",                                          0},
     {"irqstat", cmd_irqstat, "irqstat",                                         0},
     {"spawn",   cmd_spawn,   "spawn test threads (spin/yield/sleep/list/kill)", 1},
+    {"mon",     cmd_mon,
+     "monitor: mon once | mon start <ticks> [count] | mon stop <tid> | mon "
+     "list",                                                                    0},
+
     {"exit",    cmd_exit,    "exit shell",                                      1},
 };
 
@@ -392,6 +379,60 @@ static void cmd_irqstat(int argc, char** argv) {
 
 static void cmd_spawn(int argc, char** argv) {
   spawn(argc, argv);
+}
+
+static void cmd_mon(int argc, char** argv) {
+  if (argc <= 1) {
+    u_puts(
+        "usage:\n"
+        "  mon once\n"
+        "  mon start <period_ticks> [count]\n"
+        "  mon stop <tid>\n"
+        "  mon list\n");
+    return;
+  }
+
+  if (!u_strcmp(argv[1], "once")) {
+    mon_once();
+    return;
+  }
+
+  if (!u_strcmp(argv[1], "list")) {
+    mon_list();
+    return;
+  }
+
+  if (!u_strcmp(argv[1], "start")) {
+    if (argc < 3) {
+      u_puts("mon start: missing period_ticks\n");
+      return;
+    }
+    uint32_t period = (uint32_t)u_atoi(argv[2]);
+    int32_t count   = -1;
+    if (argc >= 4) count = (int32_t)u_atoi(argv[3]);
+
+    tid_t tid = mon_start(period, count);
+    if (tid < 0) {
+      u_printf("mon start failed rc=%d\n", (int)tid);
+    } else {
+      u_printf("mon started: tid=%d period=%u count=%d\n", (int)tid,
+               (unsigned)period, (int)count);
+    }
+    return;
+  }
+
+  if (!u_strcmp(argv[1], "stop")) {
+    if (argc < 3) {
+      u_puts("mon stop: missing tid\n");
+      return;
+    }
+    tid_t tid = (tid_t)u_atoi(argv[2]);
+    int rc    = mon_stop(tid);
+    u_printf("mon stop: tid=%d rc=%d\n", (int)tid, rc);
+    return;
+  }
+
+  u_puts("mon: unknown subcommand\n");
 }
 
 /* -------------------------------------------------------------------------- */

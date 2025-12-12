@@ -91,7 +91,7 @@ void secondary_main(long hartid, long dtb_pa) {
   trap_init();
 
   arch_enable_timer_interrupts();
-  arch_enable_external_interrupts();
+  // arch_enable_external_interrupts();
 
   // TODO: platform_timer_start_after()，记得要按 hart 配 timer
   platform_timer_start_after(DELTA_TICKS);

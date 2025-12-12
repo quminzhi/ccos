@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "types.h"
 
-typedef void (*thread_entry_t)(void *arg) __attribute__((noreturn));
+typedef void (*thread_entry_t)(void* arg) __attribute__((noreturn));
 tid_t thread_current(void);
 
 typedef enum {
@@ -31,6 +31,26 @@ struct u_thread_info {
   int exit_code;
   char name[32];
 
-  int cpu;   // NEW: -1 = not running, >=0 = running on that hart
+  int cpu;  // NEW: -1 = not running, >=0 = running on that hart
 };
 
+static const char* thread_state_name(int s) {
+  switch (s) {
+    case THREAD_UNUSED:
+      return "UNUSED";
+    case THREAD_RUNNABLE:
+      return "RUNNABLE";
+    case THREAD_RUNNING:
+      return "RUNNING";
+    case THREAD_SLEEPING:
+      return "SLEEP";
+    case THREAD_WAITING:
+      return "WAIT";
+    case THREAD_ZOMBIE:
+      return "ZOMBIE";
+    case THREAD_BLOCKED:
+      return "BLOCKED";
+    default:
+      return "?";
+  }
+}
