@@ -32,6 +32,12 @@ typedef struct Thread {
   int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
   int can_be_killed;
 
+  /* --- SMP debug/metrics --- */
+  int32_t  running_hart;   // -1 not running; >=0 running on that hart
+  int32_t  last_hart;      // -1 never ran;  >=0 last hart it ran on
+  uint32_t migrations;     // number of migrations
+  uint64_t runs;           // number of tim
+
   struct trapframe tf; /* 保存的寄存器上下文 */
 
   uint8_t *stack_base; /* 栈底（main 用 boot 栈 -> NULL） */
@@ -46,7 +52,6 @@ typedef struct Thread {
   uintptr_t pending_read_buf; /* 用户传来的 buf 指针 */
   uint64_t pending_read_len;  /* 用户传来的 len      */
 
-  int running_hart;  // -1 or hartid
 } Thread;
 
 /* -------------------------------------------------------------------------- */
@@ -120,5 +125,8 @@ void print_thread_prefix(void);
 typedef int (*console_reader_t)(char *buf, size_t len);
 void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf);
 void thread_read_from_stdin(console_reader_t reader);
+
+void thread_mark_running(Thread *t, uint32_t hartid);
+void thread_mark_not_running(Thread *t);
 
 #endif /* THREAD_H */

@@ -41,6 +41,24 @@ static uint64_t g_ticks = 0;
 /* Internal helpers                                                           */
 /* -------------------------------------------------------------------------- */
 
+void thread_mark_running(Thread *t, uint32_t hartid) {
+  t->running_hart = (int32_t)hartid;
+
+  // runs：每次成为 RUNNING 都 +1
+  t->runs++;
+
+  // migrations：只有“之前运行过”且 hart 变化才算
+  if (t->last_hart >= 0 && t->last_hart != (int32_t)hartid) {
+    t->migrations++;
+  }
+
+  t->last_hart = (int32_t)hartid;
+}
+
+void thread_mark_not_running(Thread *t) {
+  t->running_hart = -1;
+}
+
 static inline tid_t current_tid_get(void) {
   return (tid_t)cpu_this()->current_tid;
 }
@@ -132,6 +150,11 @@ static void recycle_thread(tid_t tid) {
   t->waiting_for     = -1;
   t->join_status_ptr = 0;
   tf_clear(&t->tf);
+
+  t->running_hart = -1;
+  t->last_hart    = -1;
+  t->migrations   = 0;
+  t->runs         = 0;
   /* 栈数组 g_thread_stacks[tid] 保留复用 */
 }
 
@@ -196,6 +219,11 @@ void threads_init(thread_entry_t user_main) {
     g_threads[i].join_status_ptr  = 0;
     g_threads[i].pending_read_buf = 0;
     g_threads[i].pending_read_len = 0;
+
+    g_threads[i].running_hart     = -1;
+    g_threads[i].last_hart        = -1;
+    g_threads[i].migrations       = 0;
+    g_threads[i].runs             = 0;
     tf_clear(&g_threads[i].tf);
   }
 
@@ -309,21 +337,14 @@ struct trapframe *schedule(struct trapframe *tf) {
     }
   }
 
-  if (next_tid >= FIRST_TID) {
-    // int old = g_threads[next_tid].running_hart;
-    // if (old != -1 && old != (int)c->hartid) {
-    //   pr_info("tid=%d migrated %d -> %u", (int)next_tid, old, c->hartid);
-    // }
-    g_threads[next_tid].running_hart = (int)c->hartid;
-  }
-
-  if (next_tid != cur_tid) c->ctx_switches++;
   c->current_tid = next_tid;
-
   Thread *next   = &g_threads[next_tid];
   next->state    = THREAD_RUNNING;
 
-  c->cur_tf      = &next->tf;
+  if (next_tid != cur_tid) c->ctx_switches++;
+  thread_mark_running(next, c->hartid);
+
+  c->cur_tf = &next->tf;
   return c->cur_tf;
 }
 
@@ -498,6 +519,10 @@ int thread_sys_list(struct u_thread_info *ubuf, int max) {
     dst->state                = (int)t->state;
     dst->is_user              = t->is_user ? 1 : 0;
     dst->exit_code            = t->exit_code;
+    dst->cpu                  = t->running_hart;
+    dst->last_hart            = t->last_hart;
+    dst->migrations           = t->migrations;
+    dst->runs                 = t->runs;
 
     if (t->id < FIRST_TID) {
       dst->cpu = t->id;  // idle tid == hartid

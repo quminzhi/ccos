@@ -248,21 +248,33 @@ static void cmd_ps(int argc, char** argv) {
     return;
   }
 
-  u_printf(" TID  STATE     MODE  CPU  EXIT   NAME\n");
-  u_printf(" ---- --------- ----  ---  ----- ------------\n");
+  u_printf(" TID  STATE     MODE CPU LAST   MIG      RUNS  NAME\n");
+  u_printf(" ---- --------- ---- --- ---- ------ --------- ---------------\n");
 
   for (int i = 0; i < n; ++i) {
     const struct u_thread_info* ti = &infos[i];
     const char* st                 = thread_state_name(ti->state);
     char mode                      = ti->is_user ? 'U' : 'S';
 
+    // CPU / LAST 打印：-1 显示为 ---
+    char cpu_s[4];
+    char last_s[5];
+
     if (ti->cpu >= 0) {
-      u_printf(" %-4d %-9s  %c   %-4d %5d %s\n", ti->tid, st, mode, ti->cpu,
-               ti->exit_code, ti->name);
+      u_snprintf(cpu_s, sizeof(cpu_s), "%d", ti->cpu);
     } else {
-      u_printf(" %-4d %-9s  %c   --- %5d %s\n", ti->tid, st, mode,
-               ti->exit_code, ti->name);
+      u_snprintf(cpu_s, sizeof(cpu_s), "---");
     }
+
+    if (ti->last_hart >= 0) {
+      u_snprintf(last_s, sizeof(last_s), "%d", ti->last_hart);
+    } else {
+      u_snprintf(last_s, sizeof(last_s), "---");
+    }
+
+    u_printf(" %-4d %-9s  %c   %-3s %-4s %6u %9llu %s\n", ti->tid, st, mode,
+             cpu_s, last_s, (unsigned)ti->migrations,
+             (unsigned long long)ti->runs, ti->name);
   }
 }
 

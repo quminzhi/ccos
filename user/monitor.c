@@ -1,35 +1,80 @@
 #include <stdint.h>
+#include <stddef.h>
+
 #include "monitor.h"
-#include "ulib.h"          // 你自己的用户态头：u_printf/sleep/thread_xxx/thread_list...
-#include "uthread.h"
-#include "syscall.h"
+#include "ulib.h"     // u_printf/sleep/u_strcmp/u_atoi...
+#include "uthread.h"  // struct u_thread_info, thread_state_name()
+#include "syscall.h"  // thread_list/thread_create/thread_kill/thread_exit...
 
 #ifndef THREAD_MAX
-#define THREAD_MAX  10
+#define THREAD_MAX 10
 #endif
 
-#define MON_MAX 4
+#define MON_MAX            4
+
+// flags: 可选过滤
+#define MON_F_USER_ONLY    (1u << 0)  // 只打印用户线程
+#define MON_F_RUNNING_ONLY (1u << 1)  // 只打印 cpu>=0 的线程
+#define MON_F_HIDE_IDLE \
+  (1u << 2)  // 隐藏 tid < MAX_HARTS 的 idle 线程（按你约定）
 
 typedef struct {
-  int      used;
-  tid_t    tid;
+  int used;
+  tid_t tid;
   uint32_t seq;
-  uint32_t period;     // ticks
-  int32_t  remaining;  // <0: forever, >=0: countdown
-  uint32_t flags;      // 预留：比如只打印用户线程、只打印非 idle...
+  uint32_t period;    // ticks
+  int32_t remaining;  // <0: forever, >=0: countdown
+  uint32_t flags;     // 过滤/选项
 } mon_ctx_t;
 
 static mon_ctx_t g_mons[MON_MAX];
 
-static void print_threads_table(const struct u_thread_info *infos, int n) {
-  u_printf(" TID  STATE     MODE  EXIT   NAME\n");
-  u_printf(" ---- --------- ----  ----- ------------\n");
+static int mon_filter_pass(const mon_ctx_t *m, const struct u_thread_info *ti) {
+  if ((m->flags & MON_F_USER_ONLY) && !ti->is_user) {
+    return 0;
+  }
+  if ((m->flags & MON_F_RUNNING_ONLY) && (ti->cpu < 0)) {
+    return 0;
+  }
+  if ((m->flags & MON_F_HIDE_IDLE) && (ti->tid >= 0) &&
+      (ti->tid < (int)MAX_HARTS)) {
+    return 0;
+  }
+  return 1;
+}
+
+static void print_threads_table(const mon_ctx_t *m,
+                                const struct u_thread_info *infos, int n) {
+  u_printf(" TID  STATE     MODE CPU LAST   MIG      RUNS  NAME\n");
+  u_printf(" ---- --------- ---- --- ---- ------ --------- ---------------\n");
+
   for (int i = 0; i < n; ++i) {
     const struct u_thread_info *ti = &infos[i];
+    if (!mon_filter_pass(m, ti)) {
+      continue;
+    }
+
     const char *st = thread_state_name(ti->state);
-    char mode = ti->is_user ? 'U' : 'S';
-    u_printf(" %-4d %-9s  %c   %5d %s\n",
-             ti->tid, st, mode, ti->exit_code, ti->name);
+    char mode      = ti->is_user ? 'U' : 'S';
+
+    // cpu / last_hart: -1 => ---
+    if (ti->cpu >= 0 && ti->last_hart >= 0) {
+      u_printf(" %-4d %-9s  %c   %-3d %-4d %6u %9llu %s\n", ti->tid, st, mode,
+               ti->cpu, ti->last_hart, (unsigned)ti->migrations,
+               (unsigned long long)ti->runs, ti->name);
+    } else if (ti->cpu >= 0 && ti->last_hart < 0) {
+      u_printf(" %-4d %-9s  %c   %-3d %-4s %6u %9llu %s\n", ti->tid, st, mode,
+               ti->cpu, "---", (unsigned)ti->migrations,
+               (unsigned long long)ti->runs, ti->name);
+    } else if (ti->cpu < 0 && ti->last_hart >= 0) {
+      u_printf(" %-4d %-9s  %c   %-3s %-4d %6u %9llu %s\n", ti->tid, st, mode,
+               "---", ti->last_hart, (unsigned)ti->migrations,
+               (unsigned long long)ti->runs, ti->name);
+    } else {
+      u_printf(" %-4d %-9s  %c   %-3s %-4s %6u %9llu %s\n", ti->tid, st, mode,
+               "---", "---", (unsigned)ti->migrations,
+               (unsigned long long)ti->runs, ti->name);
+    }
   }
 }
 
@@ -49,16 +94,15 @@ static __attribute__((noreturn)) void monitor_main(void *arg) {
     if (n < 0) {
       u_printf("\n[mon tid=%d] thread_list failed rc=%d\n", (int)m->tid, n);
     } else {
-      u_printf("\n[mon tid=%d seq=%u period=%u]\n",
-               (int)m->tid, (unsigned)m->seq++, (unsigned)m->period);
-      print_threads_table(infos, n);
+      u_printf("\n[mon tid=%d seq=%u period=%u flags=0x%x]\n", (int)m->tid,
+               (unsigned)m->seq++, (unsigned)m->period, (unsigned)m->flags);
+      print_threads_table(m, infos, n);
     }
 
     if (m->remaining >= 0) {
       m->remaining--;
       if (m->remaining == 0) {
-        // 正常退出：释放 slot
-        m->used = 0;
+        m->used = 0;  // 正常退出：释放 slot
         thread_exit(0);
       }
     }
@@ -68,12 +112,12 @@ static __attribute__((noreturn)) void monitor_main(void *arg) {
 static mon_ctx_t *mon_alloc(void) {
   for (int i = 0; i < MON_MAX; ++i) {
     if (!g_mons[i].used) {
-      g_mons[i].used = 1;
-      g_mons[i].tid = -1;
-      g_mons[i].seq = 0;
-      g_mons[i].period = 10;
+      g_mons[i].used      = 1;
+      g_mons[i].tid       = -1;
+      g_mons[i].seq       = 0;
+      g_mons[i].period    = 10;
       g_mons[i].remaining = -1;
-      g_mons[i].flags = 0;
+      g_mons[i].flags     = 0;
       return &g_mons[i];
     }
   }
@@ -91,16 +135,23 @@ static mon_ctx_t *mon_find_by_tid(tid_t tid) {
 
 /* ====== 给 shell 调用的 API ====== */
 
+tid_t mon_start_ex(uint32_t period_ticks, int32_t count, uint32_t flags);
+
 tid_t mon_start(uint32_t period_ticks, int32_t count) {
+  return mon_start_ex(period_ticks, count, 0);
+}
+
+tid_t mon_start_ex(uint32_t period_ticks, int32_t count, uint32_t flags) {
   if (period_ticks == 0) period_ticks = 1;
 
   mon_ctx_t *m = mon_alloc();
   if (!m) return -1;
 
-  m->period = period_ticks;
+  m->period    = period_ticks;
   m->remaining = count;
+  m->flags     = flags;
 
-  tid_t tid = thread_create(monitor_main, m, "monitor");
+  tid_t tid    = thread_create(monitor_main, m, "monitor");
   if (tid < 0) {
     m->used = 0;
     return tid;
@@ -112,20 +163,19 @@ tid_t mon_start(uint32_t period_ticks, int32_t count) {
 int mon_stop(tid_t tid) {
   mon_ctx_t *m = mon_find_by_tid(tid);
   if (m) {
-    m->used = 0;          // 让它“自杀式”退出（如果醒得过来）
+    m->used = 0;  // 让它“自杀式”退出（如果醒得过来）
   }
-  return thread_kill(tid); // 保险：直接 kill
+  return thread_kill(tid);  // 保险：直接 kill
 }
 
 void mon_list(void) {
   u_printf("Active monitors:\n");
   for (int i = 0; i < MON_MAX; ++i) {
     if (g_mons[i].used) {
-      u_printf("  tid=%d period=%u remaining=%d seq=%u\n",
-               (int)g_mons[i].tid,
-               (unsigned)g_mons[i].period,
-               (int)g_mons[i].remaining,
-               (unsigned)g_mons[i].seq);
+      u_printf("  tid=%d period=%u remaining=%d seq=%u flags=0x%x\n",
+               (int)g_mons[i].tid, (unsigned)g_mons[i].period,
+               (int)g_mons[i].remaining, (unsigned)g_mons[i].seq,
+               (unsigned)g_mons[i].flags);
     }
   }
 }
@@ -137,5 +187,9 @@ void mon_once(void) {
     u_printf("mon: thread_list failed rc=%d\n", n);
     return;
   }
-  print_threads_table(infos, n);
+
+  // once 默认不过滤（flags=0）
+  mon_ctx_t fake = {0};
+  fake.flags     = 0;
+  print_threads_table(&fake, infos, n);
 }

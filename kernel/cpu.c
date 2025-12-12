@@ -1,7 +1,6 @@
 #include "cpu.h"
 #include <stdint.h>
 #include "log.h"
-#include "panic.h"
 #include "arch.h"
 #include "thread.h"
 #include "riscv_csr.h"
@@ -59,6 +58,8 @@ void cpu_enter_idle(uint32_t hartid) {
 
   /* 初始状态：本 CPU 上的 idle 正在跑 */
   idle->state    = THREAD_RUNNING;
+
+  thread_mark_running(idle, hartid);
 
   /* 不会返回：直接按 idle->tf 的 sstatus/sepc sret */
   arch_first_switch(&idle->tf);

@@ -25,13 +25,19 @@ enum {
 };
 
 struct u_thread_info {
-  int tid;
-  int state;
-  int is_user;
-  int exit_code;
+  int  tid;
+  int  state;
+  int  is_user;
+  int  exit_code;
   char name[32];
 
-  int cpu;  // NEW: -1 = not running, >=0 = running on that hart
+  int  cpu;        // 当前运行在哪个 hart：-1 = not running
+  int  last_hart;  // 最近一次运行在哪个 hart：-1 = never ran
+
+  uint32_t migrations; // hart 迁移次数
+  uint32_t _pad;       // 对齐用（保证 runs 8-byte 对齐）
+
+  uint64_t runs;       // 被调度运行次数（每次成为 RUNNING +1）
 };
 
 static const char* thread_state_name(int s) {
