@@ -8,7 +8,7 @@ typedef struct {
   int day;    // 1-31
   int hour;   // 0-23
   int min;    // 0-59
-  int sec;    // 0-59 (忽略闰秒)
+  int sec;    // 0-59 (leap seconds ignored)
 } datetime_t;
 
 void epoch_to_utc_datetime(uint64_t epoch_sec, datetime_t *dt);

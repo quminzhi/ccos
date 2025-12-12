@@ -16,7 +16,7 @@ void assert_test(int *ptr, size_t len)
     PANICF("flash write failed, addr=0x%08x", (unsigned)addr);
   }
 
-  BREAK_IF(addr == 0);  // 只打断点，不挂机
+  BREAK_IF(addr == 0);  // Trigger breakpoint only, do not halt.
 }
 
 void user_main(void *arg)
@@ -43,6 +43,6 @@ void user_main(void *arg)
              status);
   }
 
-  // 理论上不会走到这里
+  // Should be unreachable.
   thread_exit(0);
 }

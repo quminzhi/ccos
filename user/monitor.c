@@ -2,9 +2,9 @@
 #include <stddef.h>
 
 #include "monitor.h"
-#include "ulib.h"     // u_printf/sleep/u_strcmp/u_atoi...
-#include "uthread.h"  // struct u_thread_info, thread_state_name()
-#include "syscall.h"  // thread_list/thread_create/thread_kill/thread_exit...
+#include "ulib.h"     /* u_printf/sleep/u_strcmp/u_atoi... */
+#include "uthread.h"  /* struct u_thread_info, thread_state_name() */
+#include "syscall.h"  /* thread_list/thread_create/thread_kill/thread_exit... */
 
 #ifndef THREAD_MAX
 #define THREAD_MAX 10
@@ -12,19 +12,19 @@
 
 #define MON_MAX            4
 
-// flags: 可选过滤
-#define MON_F_USER_ONLY    (1u << 0)  // 只打印用户线程
-#define MON_F_RUNNING_ONLY (1u << 1)  // 只打印 cpu>=0 的线程
+/* Flags: optional filters. */
+#define MON_F_USER_ONLY    (1u << 0)  /* Print user threads only. */
+#define MON_F_RUNNING_ONLY (1u << 1)  /* Print threads currently running. */
 #define MON_F_HIDE_IDLE \
-  (1u << 2)  // 隐藏 tid < MAX_HARTS 的 idle 线程（按你约定）
+  (1u << 2)  /* Hide tid < MAX_HARTS idle threads per convention. */
 
 typedef struct {
   int used;
   tid_t tid;
   uint32_t seq;
-  uint32_t period;    // ticks
-  int32_t remaining;  // <0: forever, >=0: countdown
-  uint32_t flags;     // 过滤/选项
+  uint32_t period;    /* Period in ticks. */
+  int32_t remaining;  /* <0: forever, >=0: countdown. */
+  uint32_t flags;     /* Filter/option bitmask. */
 } mon_ctx_t;
 
 static mon_ctx_t g_mons[MON_MAX];
@@ -57,7 +57,7 @@ static void print_threads_table(const mon_ctx_t *m,
     const char *st = thread_state_name(ti->state);
     char mode      = ti->is_user ? 'U' : 'S';
 
-    // cpu / last_hart: -1 => ---
+    /* cpu / last_hart: -1 => --- */
     if (ti->cpu >= 0 && ti->last_hart >= 0) {
       u_printf(" %-4d %-9s  %c   %-3d %-4d %6u %9llu %s\n", ti->tid, st, mode,
                ti->cpu, ti->last_hart, (unsigned)ti->migrations,
@@ -81,7 +81,7 @@ static void print_threads_table(const mon_ctx_t *m,
 static __attribute__((noreturn)) void monitor_main(void *arg) {
   mon_ctx_t *m = (mon_ctx_t *)arg;
 
-  // 注意：如果 shell 里 kill 掉该线程，下面不一定会走到 clean up
+  /* Note: if the shell kills this thread, the cleanup below might not run. */
   for (;;) {
     if (!m->used) {
       thread_exit(0);
@@ -102,7 +102,7 @@ static __attribute__((noreturn)) void monitor_main(void *arg) {
     if (m->remaining >= 0) {
       m->remaining--;
       if (m->remaining == 0) {
-        m->used = 0;  // 正常退出：释放 slot
+        m->used = 0;  /* Normal exit: release the slot. */
         thread_exit(0);
       }
     }
@@ -133,7 +133,7 @@ static mon_ctx_t *mon_find_by_tid(tid_t tid) {
   return NULL;
 }
 
-/* ====== 给 shell 调用的 API ====== */
+/* ====== Shell-visible API ====== */
 
 tid_t mon_start_ex(uint32_t period_ticks, int32_t count, uint32_t flags);
 
@@ -163,9 +163,9 @@ tid_t mon_start_ex(uint32_t period_ticks, int32_t count, uint32_t flags) {
 int mon_stop(tid_t tid) {
   mon_ctx_t *m = mon_find_by_tid(tid);
   if (m) {
-    m->used = 0;  // 让它“自杀式”退出（如果醒得过来）
+    m->used = 0;  /* Let it exit cooperatively if it wakes up. */
   }
-  return thread_kill(tid);  // 保险：直接 kill
+  return thread_kill(tid);  /* Fallback: issue a kill directly. */
 }
 
 void mon_list(void) {
@@ -188,7 +188,7 @@ void mon_once(void) {
     return;
   }
 
-  // once 默认不过滤（flags=0）
+  /* A one-shot dump uses no filters (flags = 0). */
   mon_ctx_t fake = {0};
   fake.flags     = 0;
   print_threads_table(&fake, infos, n);

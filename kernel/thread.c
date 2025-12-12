@@ -44,10 +44,10 @@ static uint64_t g_ticks = 0;
 void thread_mark_running(Thread *t, uint32_t hartid) {
   t->running_hart = (int32_t)hartid;
 
-  // runs：每次成为 RUNNING 都 +1
+  // Count how many times the thread reaches RUNNING.
   t->runs++;
 
-  // migrations：只有“之前运行过”且 hart 变化才算
+  // Count migrations only after it has run at least once and hart changes.
   if (t->last_hart >= 0 && t->last_hart != (int32_t)hartid) {
     t->migrations++;
   }
@@ -78,7 +78,7 @@ static inline Thread *thread_by_tid(tid_t tid) {
   return &g_threads[tid];
 }
 
-/* 找空闲 slot（1 开始：0 idle 保留） */
+/* Find a free thread slot (start at 1 so tid 0 stays reserved for idle). */
 static tid_t alloc_thread_slot(void) {
   for (int i = 1; i < THREAD_MAX; ++i) {
     if (g_threads[i].state == THREAD_UNUSED) {
@@ -101,9 +101,9 @@ static void init_thread_context_s(Thread *t, thread_entry_t entry, void *arg) {
   tf->a0   = (uintptr_t)arg;
 
   reg_t s  = csr_read(sstatus);
-  s &= ~(SSTATUS_SPP | SSTATUS_SIE);  // 先清 mode + 中断
-  s |= SSTATUS_SPP;                   // SPP=1 -> sret 到 S 模式
-  s |= SSTATUS_SPIE;                  // sret 之后开 S 模式中断
+  s &= ~(SSTATUS_SPP | SSTATUS_SIE);  // Clear mode/interrupt bits first.
+  s |= SSTATUS_SPP;                   // SPP=1 so sret returns to S-mode.
+  s |= SSTATUS_SPIE;                  // Re-enable S-mode interrupts after sret.
   tf->sstatus = s;
 }
 
@@ -115,18 +115,17 @@ static void init_thread_context_u(Thread *t, thread_entry_t entry, void *arg) {
   sp &= ~(uintptr_t)0xFUL;
 
   tf->sp   = sp;
-  tf->sepc = (uintptr_t)entry;  // user-space PC
-  tf->a0   = (uintptr_t)arg;    // 第一个参数
+  tf->sepc = (uintptr_t)entry;  // User-space PC.
+  tf->a0   = (uintptr_t)arg;    // First argument.
 
   reg_t s  = csr_read(sstatus);
   s &= ~(SSTATUS_SPP | SSTATUS_SIE);
-  // SPP=0 -> sret 到 U 模式
-  // 同时把 SPIE=1，这样 sret 之后 U 模式可以被 S-mode interrupt 打断
+  // SPP=0 so sret returns to U-mode; set SPIE so U-mode can be interrupted.
   s |= SSTATUS_SPIE;
   tf->sstatus = s;
 }
 
-/* idle 线程：简单 busy loop */
+/* Idle thread: simple busy loop that calls platform_idle(). */
 static void idle_main(void *arg) {
   (void)arg;
 
@@ -135,10 +134,10 @@ static void idle_main(void *arg) {
   }
 }
 
-/* 回收已经被 join 的线程（把 slot 变回 UNUSED） */
+/* Recycle a thread that has been joined (return slot to UNUSED). */
 static void recycle_thread(tid_t tid) {
   if (tid <= 0 || tid >= THREAD_MAX) {
-    return; /* 不回收 idle/main */
+    return; /* Leave idle/main slots untouched. */
   }
 
   Thread *t          = &g_threads[tid];
@@ -155,21 +154,20 @@ static void recycle_thread(tid_t tid) {
   t->last_hart    = -1;
   t->migrations   = 0;
   t->runs         = 0;
-  /* 栈数组 g_thread_stacks[tid] 保留复用 */
+  /* The stack array g_thread_stacks[tid] stays allocated for reuse. */
 }
 
 static char s_idle_names[MAX_HARTS][16];
 
 static const char *idle_name_for_hart(uint32_t hartid) {
-  // 生成 "idleX"
-  // 不依赖 snprintf，避免 freestanding 环境问题
+  // Generate "idleX" without snprintf to avoid freestanding issues.
   char *p    = s_idle_names[hartid];
   p[0]       = 'i';
   p[1]       = 'd';
   p[2]       = 'l';
   p[3]       = 'e';
 
-  // 简单十进制
+  // Simple decimal conversion.
   uint32_t x = hartid;
   char tmp[10];
   int n = 0;
@@ -244,7 +242,7 @@ void threads_init(thread_entry_t user_main) {
   ASSERT(user_main_tid == FIRST_TID);
 }
 
-/* 创建新线程：返回 tid，失败返回 -1 */
+/* Create a new thread: return tid or -1 on failure. */
 tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name) {
   if (!entry) {
     pr_info("thread_create: entry is NULL\n");
@@ -295,7 +293,7 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
   return tid;
 }
 
-/* 每个 timer tick 调用：更新 SLEEPING -> RUNNABLE */
+/* Called each timer tick to update SLEEPING threads to RUNNABLE. */
 void threads_tick(void) {
   g_ticks++;
 
@@ -321,14 +319,14 @@ struct trapframe *schedule(struct trapframe *tf) {
 
   for (int off = 1; off < THREAD_MAX; ++off) {
     tid_t cand = (cur_tid + off) % THREAD_MAX;
-    if (cand < FIRST_TID) continue;  // 跳过 idle tids
+    if (cand < FIRST_TID) continue;  // Skip idle tids.
     if (g_threads[cand].state == THREAD_RUNNABLE) {
       next_tid = cand;
       break;
     }
   }
 
-  // 如果当前就是普通线程，就继续跑它
+  // If currently running a normal thread, keep executing it.
   if (next_tid < 0) {
     if (cur_tid >= FIRST_TID && cur->state == THREAD_RUNNABLE) {
       next_tid = cur_tid;
@@ -355,10 +353,10 @@ void thread_block(struct trapframe *tf) {
   cur->state    = THREAD_BLOCKED;
   schedule(tf);
 
-  /* 注意：
-   *  - 对当前线程而言，这个 schedule() 不会“回来”继续执行，
-   *    它的内核调用栈就此终止，等以后再被调度时，会直接从 user 慢慢往前跑。
-   *  - 也就是说，不要在这里后面再写逻辑。
+  /* Note:
+   *  - schedule() never returns to the current thread; its kernel stack
+   *    stops here and execution resumes later in user mode.
+   *  - Do not place logic after this call.
    */
 }
 
@@ -381,7 +379,7 @@ void thread_sys_sleep(struct trapframe *tf, uint64_t ticks) {
   Thread *cur   = &g_threads[cur_tid];
 
   if (ticks == 0) {
-    /* sleep(0) = yield：不改状态，但交给调度器切一次 */
+    /* sleep(0) acts as yield: do not change state but reschedule. */
     schedule(tf);
     return;
   }
@@ -399,7 +397,7 @@ void thread_sys_yield(struct trapframe *tf) {
 void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
                        const char *name) {
   tid_t tid = thread_create_user(entry, arg, name);
-  tf->a0    = (uintptr_t)tid;  // 返回 tid 给用户态
+  tf->a0    = (uintptr_t)tid;  // Return tid to user mode.
 }
 
 void thread_sys_exit(struct trapframe *tf, int exit_code) {
@@ -408,7 +406,7 @@ void thread_sys_exit(struct trapframe *tf, int exit_code) {
   tid_t self_tid = cur_tid;
   tid_t joiner   = cur->join_waiter;
 
-  /* 保存当前上下文（主要为了调试 / backtrace） */
+  /* Save the current context (useful for debugging/backtraces). */
   cur->tf        = *tf;
   cur->exit_code = exit_code;
   cur->state     = THREAD_ZOMBIE;
@@ -416,60 +414,60 @@ void thread_sys_exit(struct trapframe *tf, int exit_code) {
   if (joiner >= 0 && joiner < THREAD_MAX) {
     Thread *w = &g_threads[joiner];
 
-    /* 如果 join 时传了 status 指针，这里写入 exit_code */
+    /* If join provided a status pointer, write exit_code into it. */
     if (w->join_status_ptr != 0) {
       int *p = (int *)w->join_status_ptr;
       *p     = exit_code;
     }
 
-    /* 设置 join 返回值为 0（成功） */
+    /* Cause join to return 0 (success). */
     w->tf.a0           = 0;
 
-    /* 清理等待关系并唤醒 joiner */
+    /* Clear wait relationships and wake the joiner. */
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
     if (w->state == THREAD_WAITING) {
       w->state = THREAD_RUNNABLE;
     }
 
-    /* 有 joiner 的话，直接在这里回收自己，避免长期 ZOMBIE */
+    /* If a joiner exists, recycle immediately to avoid lingering ZOMBIE. */
     recycle_thread(self_tid);
   }
 
   cur->join_waiter = -1;
 
-  /* 注意：没有 joiner 的线程保持 ZOMBIE 状态，等将来别的线程 join 它。 */
+  /* Threads without joiners remain ZOMBIE until someone joins them. */
 
   schedule(tf);
 }
 
-/* join 的内核实现：
- *  - target_tid: 要等待的线程
- *  - status_ptr: 用户传入的 int*（可以为 0）
+/* Kernel-side join implementation:
+ *  - target_tid: thread being waited on
+ *  - status_ptr: optional user int*
  */
 void thread_sys_join(struct trapframe *tf, tid_t target_tid,
                      uintptr_t status_ptr) {
   tid_t cur_tid = current_tid_get();
   Thread *cur   = &g_threads[cur_tid];
 
-  /* 一些基本检查 */
+  /* Basic checks. */
   if (target_tid <= 0 || target_tid >= THREAD_MAX) {
     tf->a0 = -1; /* EINVAL */
     return;
   }
   if (target_tid == cur_tid) {
-    tf->a0 = -2; /* EDEADLK: 自己 join 自己 */
+    tf->a0 = -2; /* EDEADLK: joining self. */
     return;
   }
 
   Thread *t = &g_threads[target_tid];
 
   if (t->state == THREAD_UNUSED) {
-    tf->a0 = -3; /* ESRCH: 该线程不存在或已被回收 */
+    tf->a0 = -3; /* ESRCH: thread missing or already recycled. */
     return;
   }
 
-  /* 如果目标已经是 ZOMBIE：立刻回收并返回 */
+  /* Target already ZOMBIE: recycle immediately and return. */
   if (t->state == THREAD_ZOMBIE) {
     if (status_ptr != 0) {
       int *p = (int *)status_ptr;
@@ -480,13 +478,13 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
     return;
   }
 
-  /* 目标还有别的 joiner？简化起见：一次只允许一个 joiner */
+  /* Another joiner already waiting? Allow only one joiner at a time. */
   if (t->join_waiter >= 0 && t->join_waiter != cur_tid) {
-    tf->a0 = -4; /* EBUSY: 已有其它线程在 join 它 */
+    tf->a0 = -4; /* EBUSY: some other thread is joining it. */
     return;
   }
 
-  /* 走到这里：目标仍在运行中，需要阻塞当前线程等待 */
+  /* Reaching this point means the target still runs; block current thread. */
 
   cur->state           = THREAD_WAITING;
   cur->waiting_for     = target_tid;
@@ -494,12 +492,12 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
 
   t->join_waiter       = cur_tid;
 
-  /* 阻塞当前线程，切换到其它线程。
+  /* Block the current thread and switch away.
    *
-   * 注意：
-   *  - 这里之后不要再写任何逻辑了！
-   *  - 我们不在这里设置返回值；返回值由 thread_sys_exit()
-   *    在唤醒 joiner 的时候，通过修改 w->tf.a0=0 来完成。
+   * Notes:
+   *  - Do not add logic after this point.
+   *  - We do not set the return value here; thread_sys_exit()
+   *    writes w->tf.a0 = 0 when it wakes the joiner.
    */
   schedule(tf);
 }
@@ -545,47 +543,47 @@ int thread_sys_list(struct u_thread_info *ubuf, int max) {
 
 void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
   tid_t cur_tid = current_tid_get();
-  /* 基本检查 */
+  /* Basic checks. */
   if (target_tid < 0 || target_tid >= THREAD_MAX) {
     tf->a0 = -1;  // EINVAL
     return;
   }
 
   if (target_tid == 0) {
-    tf->a0 = -2;  // 不允许杀 idle
+    tf->a0 = -2;  // Killing idle threads is not allowed.
     return;
   }
 
   if (target_tid == cur_tid) {
-    tf->a0 = -4;  // 不允许通过 kill 自杀（让用户态用 thread_exit）
+    tf->a0 = -4;  // Do not allow kill-based suicide; use thread_exit instead.
     return;
   }
 
   Thread *t = &g_threads[target_tid];
 
   if (t->can_be_killed == 0) {
-    tf->a0 = -3;  // 该线程不许 killed
+    tf->a0 = -3;  // Thread may not be killed.
     return;
   }
 
   if (t->state == THREAD_UNUSED) {
-    tf->a0 = -3;  // ESRCH: 不存在
+    tf->a0 = -3;  // ESRCH: thread not found.
     return;
   }
 
   if (t->state == THREAD_ZOMBIE) {
-    tf->a0 = 0;  // 已经死了，当成功
+    tf->a0 = 0;  // Already dead; treat as success.
     return;
   }
 
-  /* 记录一下是否有 joiner */
+  /* Remember whether a joiner exists. */
   tid_t joiner = t->join_waiter;
 
-  /* 强制标记为 ZOMBIE（SIGKILL 风格） */
-  t->exit_code = THREAD_EXITCODE_SIGKILL;  // 一般是 -9
+  /* Force ZOMBIE state (SIGKILL semantics). */
+  t->exit_code = THREAD_EXITCODE_SIGKILL;  // Usually -9.
   t->state     = THREAD_ZOMBIE;
 
-  /* 如果有人在 join 它，就按正常 exit 的逻辑处理 joiner */
+  /* If there is a joiner, reuse the normal exit logic for it. */
   if (joiner >= 0 && joiner < THREAD_MAX) {
     Thread *w = &g_threads[joiner];
 
@@ -594,23 +592,23 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
       *p     = t->exit_code;
     }
 
-    /* 设置 join 返回值为 0（成功） */
+    /* Make join return 0 (success). */
     w->tf.a0           = 0;
 
-    /* 清理等待关系并唤醒 joiner */
+    /* Clear wait state and wake the joiner. */
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
     if (w->state == THREAD_WAITING) {
       w->state = THREAD_RUNNABLE;
     }
 
-    /* 有 joiner 的话，立刻回收被 kill 的线程 slot，避免长期 ZOMBIE */
+    /* Immediately recycle the killed thread's slot when a joiner exists. */
     recycle_thread(target_tid);
   }
 
   t->join_waiter = -1;
 
-  /* kill syscall 本身的返回值：0 = 成功 */
+  /* kill syscall returns 0 to indicate success. */
   tf->a0         = 0;
 }
 
@@ -645,13 +643,13 @@ void print_thread_prefix(void) {
 }
 
 void thread_wait_for_stdin(char *buf, uint64_t len, struct trapframe *tf) {
-  /* 没数据：登记 read 上下文，并 block 当前线程 */
+  /* No data: record read context and block the thread. */
   Thread *cur           = &g_threads[thread_current()];
 
   cur->pending_read_buf = (uintptr_t)buf;
   cur->pending_read_len = len;
 
-  /* 这里不返回给当前线程，而是把它挂起 */
+  /* Do not return to this thread; suspend it instead. */
   g_stdin_waiter        = cur->id;
   thread_block(tf);
 }
@@ -669,17 +667,17 @@ void thread_read_from_stdin(console_reader_t read) {
 
   int n          = read(user_buf, max_len);
   if (n <= 0) {
-    // 没读到东西（极端 race），那就等下次中断再说
+    // If nothing was read (rare race), wait for the next interrupt.
     return;
   }
 
-  /* 设置 read 的返回值：下次这线程被调度、trap 返回时，用户看到的是 n */
+  /* Program the read() return value so user space sees n next run. */
   t->tf.a0            = (uintptr_t)n;
 
-  /* 清理 pending_read 上下文 */
+  /* Clear the pending_read context. */
   t->pending_read_buf = 0;
   t->pending_read_len = 0;
 
-  /* 4. 唤醒线程，并把 waiter 标记清掉 */
+  /* 4. Wake the thread and clear the waiter flag. */
   thread_wake(g_stdin_waiter);
 }

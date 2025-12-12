@@ -3,19 +3,19 @@
 #include "types.h"
 
 /*
- * 启动一个 shell 线程：
- *   - 成功：返回 tid
- *   - 失败：返回负数
+ * Start a shell thread:
+ *   - Success: return tid
+ *   - Failure: return negative error
  *
- * 通常在 user_main 里这样用：
+ * Typical use in user_main:
  *   tid_t shell_tid = shell_start();
  *   thread_join(shell_tid, &status);
  */
 tid_t shell_start(void);
 
 /*
- * shell 线程入口函数。
- * 也可以直接传给 thread_create：
+ * Entry function for the shell thread.
+ * It can be passed directly to thread_create:
  *
  *   thread_create(shell_thread, NULL, "shell");
  */

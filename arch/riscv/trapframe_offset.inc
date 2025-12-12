@@ -1,5 +1,5 @@
 /* arch/riscv/trap_offsets.inc */
-/* 必须和 trap.h 里的 struct trapframe 一致 */
+/* Must stay in sync with struct trapframe in trap.h. */
 
     .equ     TF_RA,      0
     .equ     TF_SP,      8

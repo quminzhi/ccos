@@ -13,7 +13,7 @@ void *u_memcpy(void *dst, const void *src, size_t n)
   return dst;
 }
 
-/* 支持重叠区域 */
+/* Supports overlapping regions. */
 void *u_memmove(void *dst, const void *src, size_t n)
 {
   unsigned char *d       = (unsigned char *)dst;
@@ -24,12 +24,12 @@ void *u_memmove(void *dst, const void *src, size_t n)
   }
 
   if (d < s) {
-    /* 正向拷贝 */
+    /* Forward copy. */
     for (size_t i = 0; i < n; ++i) {
       d[i] = s[i];
     }
   } else {
-    /* 反向拷贝，避免覆盖 */
+    /* Reverse copy to avoid overwrite. */
     for (size_t i = n; i > 0; --i) {
       d[i - 1] = s[i - 1];
     }
@@ -106,7 +106,7 @@ char *u_strcpy(char *dst, const char *src)
   return ret;
 }
 
-/* 最多拷贝 n 个字节，多余补 0 */
+/* Copy up to n bytes, padding with zeros if needed. */
 char *u_strncpy(char *dst, const char *src, size_t n)
 {
   char *ret = dst;
@@ -151,7 +151,7 @@ char *u_strrchr(const char *s, int c)
   return (char *)last;
 }
 
-/* ===== 简单数字转换 ===== */
+/* ===== Simple number helpers ===== */
 
 static int u_isspace_ch(char c)
 {
@@ -166,7 +166,7 @@ long u_atol(const char *s)
   long sign = 1;
   long val  = 0;
 
-  /* 跳过空白 */
+  /* Skip leading whitespace. */
   while (u_isspace_ch(*s)) {
     ++s;
   }

@@ -21,8 +21,8 @@ int thread_join(tid_t tid, int *status_out);
 tid_t thread_create(thread_entry_t entry, void *arg, const char *name);
 void thread_exit(int exit_code) __attribute__((noreturn));
 
-int thread_list(struct u_thread_info *buf, int max);  // 返回实际个数 / 负错误码
-int thread_kill(tid_t tid);                           // 0=OK, <0=错误
+int thread_list(struct u_thread_info *buf, int max);  // Count returned or <0 on error.
+int thread_kill(tid_t tid);                           // 0 on success, <0 on error.
 
 // clock_id support CLOCK_REALTIME(0) only
 int clock_gettime(int clock_id, struct timespec *ts);

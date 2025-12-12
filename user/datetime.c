@@ -1,15 +1,15 @@
 // datetime.c
 #include "datetime.h"
 
-// 一天的秒数
+// Seconds per unit.
 #define SECS_PER_MIN   60
 #define SECS_PER_HOUR  (60 * SECS_PER_MIN)
 #define SECS_PER_DAY   (24 * SECS_PER_HOUR)
 
-// month_days[0] 表示 1 月的天数，2 月先按平年来，闰年时会特殊处理
+// month_days[0] is January; February uses leap-year logic below.
 static const int month_days[12] = {
   31, // Jan
-  28, // Feb (平年，闰年时当29)
+  28, // Feb (29 in leap years)
   31, // Mar
   30, // Apr
   31, // May
@@ -24,29 +24,29 @@ static const int month_days[12] = {
 
 static int is_leap_year(int year)
 {
-  // 公历规则：能被4整除且不能被100整除，或者能被400整除
+  // Gregorian rule: divisible by 4 and not by 100, unless divisible by 400.
   if ((year % 4) != 0)    return 0;
   if ((year % 100) != 0)  return 1;
   if ((year % 400) != 0)  return 0;
   return 1;
 }
 
-// 输入：epoch 秒（自 1970-01-01 00:00:00 UTC 起）
-// 输出：UTC 时间
+// Input: epoch seconds since 1970-01-01 00:00:00 UTC.
+// Output: UTC time components.
 void epoch_to_utc_datetime(uint64_t epoch_sec, datetime_t *dt)
 {
-  // 0. 拆成“天数 + 当天秒数”
+  // Step 0: split into days + intra-day seconds.
   uint64_t days = epoch_sec / SECS_PER_DAY;
   uint32_t sec_of_day = (uint32_t)(epoch_sec % SECS_PER_DAY);
 
-  // 1. 计算时分秒（当天内部）
+  // Step 1: compute hour/min/sec within the day.
   dt->hour = (int)(sec_of_day / SECS_PER_HOUR);
   sec_of_day %= SECS_PER_HOUR;
 
   dt->min  = (int)(sec_of_day / SECS_PER_MIN);
   dt->sec  = (int)(sec_of_day % SECS_PER_MIN);
 
-  // 2. 从 1970 年开始，一年一年减去天数，找到当前年份
+  // Step 2: subtract years starting from 1970 to find the current year.
   int year = 1970;
   while (1) {
     int days_in_year = is_leap_year(year) ? 366 : 365;
@@ -59,12 +59,12 @@ void epoch_to_utc_datetime(uint64_t epoch_sec, datetime_t *dt)
   }
   dt->year = year;
 
-  // 3. 在当年内部按月减去天数，找到当前月份
-  int month = 0; // 0-based, 最后 +1
+  // Step 3: subtract months within the current year.
+  int month = 0; // 0-based; add 1 later.
   while (month < 12) {
     int dim = month_days[month];
     if (month == 1 && is_leap_year(year)) {
-      // 闰年 2 月
+      // Leap-year February.
       dim = 29;
     }
 
@@ -76,6 +76,6 @@ void epoch_to_utc_datetime(uint64_t epoch_sec, datetime_t *dt)
     }
   }
 
-  dt->month = month + 1;        // 转为 1-12
-  dt->day   = (int)days + 1;    // days 从 0 开始，+1 变成 1-31
+  dt->month = month + 1;        // Convert to 1-12.
+  dt->day   = (int)days + 1;    // days was zero-based; convert to 1-31.
 }

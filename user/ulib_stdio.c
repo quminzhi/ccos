@@ -2,10 +2,10 @@
 #include "syscall.h"
 #include <stdarg.h>
 
-/* 内部 util: 输出一个缓冲区到 stdout */
+/* Internal helper: write a buffer to stdout. */
 static int write_all(const char *buf, size_t len)
 {
-  /* 对于简单系统，假设一次 sys_write 就能写完 */
+  /* For this simple system, assume a single sys_write completes. */
   int rc = write(1, buf, len);
   return rc;
 }
@@ -28,10 +28,10 @@ int u_puts(const char *s)
   return (int)(len + 1);
 }
 
-/* 把整数转成字符串（radix = 10 or 16） */
+/* Convert integer to string (radix 10 or 16). */
 static char *u_itoa(long long value, char *buf_end, int base, int sign)
 {
-  /* buf_end 指向缓冲区末尾后一个位置，从后往前写 */
+  /* buf_end points one past the buffer; write backwards. */
   unsigned long long v;
 
   if (sign && value < 0) {
@@ -62,7 +62,7 @@ static char *u_itoa(long long value, char *buf_end, int base, int sign)
   return p;
 }
 
-/* 内部：输出一个字符到 buf（带截断计算） */
+/* Internal: emit a char into buf with truncation bookkeeping. */
 static inline void out_char(char *buf, size_t *pos, size_t *total, size_t avail,
                             char ch)
 {
@@ -75,9 +75,9 @@ static inline void out_char(char *buf, size_t *pos, size_t *total, size_t avail,
 
 static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 {
-  size_t total = 0;  // 理论输出长度（不含 '\0'）
-  size_t pos   = 0;  // 实际写入位置
-  size_t avail = 0;  // 最多可写字符数（预留 1 字节给 '\0'）
+  size_t total = 0;  // Theoretical output length (excludes '\0').
+  size_t pos   = 0;  // Actual write position.
+  size_t avail = 0;  // Writable chars (leave room for '\0').
 
   if (size > 0) {
     avail = size - 1;
@@ -89,7 +89,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
       continue;
     }
 
-    /* 解析 %[flags][width][.precision][length]specifier */
+    /* Parse %[flags][width][.precision][length]specifier. */
     ++fmt;
     if (*fmt == '\0') break;
 
@@ -121,7 +121,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
       ++fmt;
     }
 
-    /* -------- precision (忽略，只是跳过) -------- */
+    /* -------- precision (ignored; skip over it) -------- */
     if (*fmt == '.') {
       ++fmt;
       while (*fmt >= '0' && *fmt <= '9') {
@@ -129,7 +129,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
       }
     }
 
-    /* -------- length 修饰符：l / ll / z -------- */
+    /* -------- length modifier: l / ll / z -------- */
     enum { LEN_NONE = 0, LEN_L, LEN_LL, LEN_Z } length_mod = LEN_NONE;
 
     if (*fmt == 'l') {
@@ -149,7 +149,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 
     char spec = *fmt;
 
-    /* -------- 把值格式化到 tmp[] -------- */
+    /* -------- Format the value into tmp[] -------- */
     char tmp[64];
     char *str  = tmp;
     size_t len = 0;
@@ -168,7 +168,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
         if (!s) s = "(null)";
         str      = (char *)s;
         len      = u_strlen(s);
-        zero_pad = 0;  // 字符串不做 0 填充
+        zero_pad = 0;  // No zero padding for strings.
         break;
       }
 
@@ -187,7 +187,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
             break;
           case LEN_Z:
             v = (long long)va_arg(ap, long);
-            break;  // 简单处理
+            break;  // Simplified handling.
         }
         char *start = u_itoa(v, tmp + sizeof(tmp), 10, 1);
         str         = start;
@@ -240,14 +240,14 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
       }
 
       default: {
-        /* 不支持的格式，输出 "%X" */
+        /* Unsupported specifier: print "%X". */
         out_char(buf, &pos, &total, avail, '%');
         out_char(buf, &pos, &total, avail, spec);
         continue;
       }
     }
 
-    /* -------- 应用宽度/对齐/填充 -------- */
+    /* -------- Apply width/alignment/padding -------- */
     size_t field_len = len;
     size_t pad_len   = 0;
     char pad_char    = ' ';
@@ -260,19 +260,19 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
       pad_char = '0';
     }
 
-    /* 右对齐：pad 在前 */
+    /* Right-align: pad comes first. */
     if (!left_adjust) {
       for (size_t i = 0; i < pad_len; ++i) {
         out_char(buf, &pos, &total, avail, pad_char);
       }
     }
 
-    /* 输出实际内容 */
+    /* Emit the formatted content. */
     for (size_t i = 0; i < len; ++i) {
       out_char(buf, &pos, &total, avail, str[i]);
     }
 
-    /* 左对齐：pad 在后 */
+    /* Left-align: pad after content. */
     if (left_adjust) {
       for (size_t i = 0; i < pad_len; ++i) {
         out_char(buf, &pos, &total, avail, ' ');
@@ -280,7 +280,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
     }
   }
 
-  /* 结尾 '\0' */
+  /* Append '\0'. */
   if (size > 0) {
     size_t term = (pos <= avail) ? pos : avail;
     buf[term]   = '\0';
@@ -308,7 +308,7 @@ int u_printf(const char *fmt, ...)
   va_end(ap);
 
   if (n > 0) {
-    /* u_vsnprintf 返回的是“理论长度”，可能超过 buf 大小 */
+    /* u_vsnprintf reports the theoretical length, which may exceed buf. */
     size_t to_write = (n < (int)sizeof(buf)) ? (size_t)n : sizeof(buf) - 1;
     write_all(buf, to_write);
   }
@@ -325,18 +325,18 @@ int u_read_line(int fd, char *buf, int buf_size)
 
   for (;;) {
     if (used >= buf_size - 1) {
-      // 缓冲区满了，直接结束这一行
+      // Buffer full: terminate the line immediately.
       break;
     }
 
     char c;
     int n = read(fd, &c, 1);
     if (n < 0) {
-      // 未来有错误码可以直接返回 n
+      // Future: propagate specific error codes directly.
       return n;
     }
     if (n == 0) {
-      // EOF
+      // EOF.
       if (used == 0) {
         return 0;
       }
@@ -344,7 +344,7 @@ int u_read_line(int fd, char *buf, int buf_size)
     }
 
     if (c == '\n' || c == '\r') {
-      // 行结束，丢掉行尾，不写入 buf
+      // End of line: drop the newline without storing it.
       break;
     }
 
@@ -364,10 +364,10 @@ int u_getchar(void)
       return (int)ch;
     }
     if (n == 0) {
-      // EOF（目前你大概用不到），用 -1 表示
+      // EOF (unlikely yet); return -1.
       return -1;
     }
-    // n < 0: 将来如果你有错误码，可以直接返回 n
+    // n < 0: propagate future error codes directly.
     return n;
   }
 }
@@ -384,11 +384,11 @@ int u_gets(char *buf, int buf_size)
     char c;
     int n = read(FD_STDIN, &c, 1);
     if (n < 0) {
-      // 真正的 read 错误，直接返回错误码
+      // Genuine read error: return the code.
       return n;
     }
     if (n == 0) {
-      // EOF：如果一行一个字节都没读到，就返回 0
+      // EOF: if line is empty, return 0.
       if (used == 0) {
         return 0;
       }
@@ -397,32 +397,32 @@ int u_gets(char *buf, int buf_size)
 
     unsigned char uc = (unsigned char)c;
 
-    /* ---- Ctrl-C：中断当前行 ---- */
-    if (uc == 0x03) {  // ASCII ETX，Ctrl-C
-      // 回显 ^C 并换行（看起来和常见 shell 一样）
+    /* ---- Ctrl-C: abort current line ---- */
+    if (uc == 0x03) {  // ASCII ETX, Ctrl-C
+      // Echo ^C newline to mimic common shells.
       u_putchar('^');
       u_putchar('C');
       u_putchar('\n');
 
-      // 丢弃当前行
+      // Discard the current line.
       buf[0] = '\0';
       used   = 0;
 
-      // 告诉上层：这一行被 Ctrl-C 打断了
+      // Tell caller this line was interrupted.
       return U_GETS_INTR;
     }
 
-    /* ---- 行结束：回车/换行 ---- */
+    /* ---- Line ending: CR/LF ---- */
     if (c == '\n' || c == '\r') {
       u_putchar('\n');
       break;
     }
 
-    /* ---- 退格：\b 或 DEL ---- */
+    /* ---- Backspace: '\b' or DEL ---- */
     if (c == '\b' || uc == 0x7f) {
       if (used > 0) {
         used--;
-        // 在终端上擦掉最后一个字符：左移、写空格、再左移
+        // Erase last char on terminal: backspace, space, backspace.
         u_putchar('\b');
         u_putchar(' ');
         u_putchar('\b');
@@ -430,17 +430,17 @@ int u_gets(char *buf, int buf_size)
       continue;
     }
 
-    /* 其它控制字符先忽略（你以后可以扩展） */
+    /* Ignore other control characters for now. */
     if (uc < 0x20) {
       continue;
     }
 
-    /* ---- 正常可见字符 ---- */
+    /* ---- Visible characters ---- */
     if (used < buf_size - 1) {
       buf[used++] = c;
       u_putchar(c);
     } else {
-      // 行太长：简单丢弃后续字符，也可以选择响铃一下
+      // Line too long: drop extra chars (optional bell).
       // u_putchar('\a');
     }
   }
@@ -457,16 +457,16 @@ int u_readn(int fd, void *buf, int nbytes)
   while (total < nbytes) {
     int n = read(fd, p + total, (uint64_t)(nbytes - total));
     if (n < 0) {
-      // 将来有错误码可以直接 return n
+      // Future: propagate precise error codes.
       return n;
     }
     if (n == 0) {
-      // EOF，提前结束
+      // EOF: stop early.
       break;
     }
     total += n;
   }
-  return total;  // 可能 < nbytes（遇到 EOF）
+  return total;  // May be < nbytes if EOF hit.
 }
 
 int u_read_until(int fd, char *buf, int buf_size, char delim)
@@ -479,7 +479,7 @@ int u_read_until(int fd, char *buf, int buf_size, char delim)
 
   for (;;) {
     if (used >= buf_size - 1) {
-      // 缓冲区满了
+      // Buffer full.
       break;
     }
 
@@ -488,7 +488,7 @@ int u_read_until(int fd, char *buf, int buf_size, char delim)
       return n;
     }
     if (n == 0) {
-      // EOF
+      // EOF.
       break;
     }
 
@@ -496,7 +496,7 @@ int u_read_until(int fd, char *buf, int buf_size, char delim)
     used++;
 
     if (c == delim) {
-      break;  // 读到了分隔符
+      break;  // Reached delimiter.
     }
   }
 

@@ -13,7 +13,7 @@ uint64_t write(int fd, const void *buf, uint64_t len)
                    :
                    : "memory");
 
-  return (int)a0; /* 返回写入的字节数或负数错误码 */
+  return (int)a0; /* Bytes written or negative error. */
 }
 
 uint64_t read(int fd, void *buf, uint64_t len)
@@ -28,7 +28,7 @@ uint64_t read(int fd, void *buf, uint64_t len)
                    :
                    : "memory");
 
-  return (int)a0; /* 返回读到的字节数或负数错误码 */
+  return (int)a0; /* Bytes read or negative error. */
 }
 
 void sleep(uint64_t ticks)
@@ -39,7 +39,7 @@ void sleep(uint64_t ticks)
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : : "memory");
 }
 
-/* 用户侧 thread_exit：不会返回 */
+/* User-side thread_exit: never returns. */
 void thread_exit(int exit_code)
 {
   register uintptr_t a0 asm("a0") = SYS_THREAD_EXIT;
@@ -50,7 +50,7 @@ void thread_exit(int exit_code)
   __builtin_unreachable();
 }
 
-/* 用户侧 thread_join：阻塞直到 tid 退出 */
+/* User-side thread_join: block until tid exits. */
 int thread_join(tid_t tid, int *status_out)
 {
   register uintptr_t a0 asm("a0") = SYS_THREAD_JOIN;
@@ -59,7 +59,7 @@ int thread_join(tid_t tid, int *status_out)
 
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
 
-  /* 返回值在 a0 里 */
+  /* Return value is in a0. */
   return (int)a0;
 }
 
@@ -75,7 +75,7 @@ tid_t thread_create(thread_entry_t entry, void *arg, const char *name)
                    :
                    : "memory");
 
-  return (tid_t)a0;  // 返回 tid（<0 表示失败）
+  return (tid_t)a0;  /* tid on success, <0 on failure. */
 }
 
 int thread_list(struct u_thread_info *buf, int max)
@@ -99,13 +99,13 @@ int thread_kill(tid_t tid)
 
 int clock_gettime(int clock_id, struct timespec *ts)
 {
-  register uintptr_t a0 asm("a0") = SYS_CLOCK_GETTIME;  // syscall 号
+  register uintptr_t a0 asm("a0") = SYS_CLOCK_GETTIME;  // syscall number
   register uintptr_t a1 asm("a1") = (uintptr_t)clock_id;
   register uintptr_t a2 asm("a2") = (uintptr_t)ts;
 
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
 
-  // 约定：a0 返回 0 表示成功，<0 表示错误
+  /* Convention: a0 == 0 success, <0 error code. */
   return (int)a0;
 }
 
@@ -117,7 +117,7 @@ long irq_get_stats(struct irqstat_user *buf, size_t n)
 
   __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
 
-  return (long)a0;  // 返回实际写入的条数（<0 表示错误）
+  return (long)a0;  /* Entries written, or <0 on error. */
 }
 
 int get_hartid(void) {

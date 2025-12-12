@@ -8,4 +8,4 @@ int   mon_stop(tid_t tid);
 void  mon_list(void);
 void  mon_once(void);
 
-#endif // MONITOR_H
+#endif /* MONITOR_H */

@@ -17,21 +17,21 @@ typedef struct {
 
   spawn_mode_t mode;
 
-  // 行为参数
-  uint32_t work_loops;   // 每轮忙循环次数
-  uint32_t sleep_ticks;  // mode==SLEEP时用
-  uint32_t print_every;  // 每多少轮打印一次
+  /* Behavior knobs. */
+  uint32_t work_loops;   // Busy-loop iterations per round.
+  uint32_t sleep_ticks;  // Used when mode == SPAWN_MODE_SLEEP.
+  uint32_t print_every;  // Print once every N iterations.
 
-  // 观测数据（线程自己维护）
-  volatile int last_hart;        // 最近一次运行在哪个 hart
-  volatile uint32_t migrations;  // 发生过几次 hart 变化
-  volatile uint32_t prints;      // 打印次数
+  /* Observed statistics, maintained by each thread. */
+  volatile int last_hart;        // Last hart this thread ran on.
+  volatile uint32_t migrations;  // Number of hart changes observed.
+  volatile uint32_t prints;      // Number of log lines printed.
 } spawn_cfg_t;
 
 static spawn_cfg_t s_spawn_cfg[SPAWN_MAX];
 static int s_spawn_count = 0;
 
-// 小工具：把 "spawn0" 写到 buf（避免依赖 snprintf）
+/* Small helper: write "spawn0" into buf without snprintf. */
 static void make_name(char* buf, int buf_len, const char* prefix, int n) {
   if (buf_len <= 0) return;
   int i = 0;
@@ -50,25 +50,25 @@ static void make_name(char* buf, int buf_len, const char* prefix, int n) {
 static __attribute__((noreturn)) void spawn_worker(void* arg) {
   spawn_cfg_t* c = (spawn_cfg_t*)arg;
 
-  // 稍微错开启动，减少所有线程同时打印导致串口淹没
+  /* Slight stagger to avoid overwhelming the console at start. */
   sleep(1);
 
   uint32_t it = 0;
 
   for (;;) {
-    // 1) busy work
+    // 1) Busy work loop.
     for (volatile uint32_t i = 0; i < c->work_loops; ++i) {
       __asm__ volatile("" ::: "memory");
     }
 
-    // 2) optional yield/sleep
+    // 2) Optional yield/sleep.
     if (c->mode == SPAWN_MODE_YIELD) {
-      sleep(0);  // yield
+      sleep(0);  // Yield.
     } else if (c->mode == SPAWN_MODE_SLEEP) {
       sleep(c->sleep_ticks);
     }
 
-    // 3) observe hart + migrations
+    // 3) Track hart placement and migrations.
     int hart = get_hartid();
     int last = c->last_hart;
     if (last != -1 && last != hart) {
@@ -76,11 +76,11 @@ static __attribute__((noreturn)) void spawn_worker(void* arg) {
     }
     c->last_hart = hart;
 
-    // 4) print occasionally
+    // 4) Print occasionally.
     it++;
     if (c->print_every && (it % c->print_every) == 0) {
       c->prints++;
-      // 一行打印：尽量减少字符级 interleave
+      // Keep each print on a single line to minimize interleave.
       u_printf("[spawn] tid=%d wid=%d mode=%d hart=%d mig=%u prints=%u\n",
                c->tid, c->wid, (int)c->mode, hart, (unsigned)c->migrations,
                (unsigned)c->prints);
@@ -115,7 +115,8 @@ static int spawn_add(spawn_mode_t mode, uint32_t sleep_ticks,
   c->sleep_ticks = sleep_ticks;
   c->print_every = (print_every == 0) ? 50 : print_every;
 
-  // work_loops 你可以按性能调：太小会刷爆日志，太大迁移不明显
+  // Adjust work_loops depending on performance: too small spams logs,
+  // too large hides migration behavior.
   c->work_loops  = 200000;
 
   c->last_hart   = -1;
@@ -155,13 +156,13 @@ void spawn(int argc, char** argv) {
   }
 
   if (!u_strcmp(sub, "kill")) {
-    // 复用你现有的 kill syscall wrapper（cmd_kill 用的那个）
-    // 假设函数叫 thread_kill(tid)：
+    // Reuse the existing kill syscall wrapper (same one cmd_kill uses).
+    // Replace with your own helper if it has a different name.
     int killed = 0;
     for (int i = 0; i < s_spawn_count; ++i) {
       int tid = s_spawn_cfg[i].tid;
       if (tid >= 0) {
-        thread_kill(tid);  // <- 用你现有的接口名替换
+        thread_kill(tid);  // Replace with your own helper name if needed.
         killed++;
       }
     }

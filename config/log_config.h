@@ -5,10 +5,10 @@
 
 #ifndef __ASSEMBLER__
 
-// 声明在 log_lock.c 里定义的全局锁
+/* Declare the global lock defined in log_lock.c. */
 extern spinlock_t g_log_lock;
 
-// LOG_LOCK and LOG_UNLOCK hooks
+/* LOG_LOCK and LOG_UNLOCK hooks. */
 #define LOG_LOCK()   spin_lock(&g_log_lock)
 #define LOG_UNLOCK() spin_unlock(&g_log_lock)
 
@@ -19,4 +19,4 @@ extern spinlock_t g_log_lock;
 #define LOG_DEFAULT_PATH_MODE     LOG_PATH_BASENAME
 #define LOG_ENABLE_TIMESTAMP      0
 
-#endif  // BAREMETAL_LOG_CONFIG_H
+#endif  /* BAREMETAL_LOG_CONFIG_H */
