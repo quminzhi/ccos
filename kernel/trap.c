@@ -161,7 +161,7 @@ static void syscall_handler(struct trapframe *tf) {
 }
 
 struct trapframe *trap_entry_c(struct trapframe *tf) {
-  kernel_lock();
+  reg_t irq_state = kernel_lock();
   struct trapframe *ret;
 
   const reg_t scause      = tf->scause;
@@ -225,7 +225,7 @@ handled:
 #endif
 
   ret = cpu_this()->cur_tf;
-  kernel_unlock();
+  kernel_unlock(irq_state);
   return ret;
 }
 
