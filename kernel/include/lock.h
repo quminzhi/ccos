@@ -4,12 +4,12 @@
 
 extern spinlock_t g_kernel_lock;
 
-static inline void kernel_lock(void) {
-  spin_lock(&g_kernel_lock);
+static inline reg_t kernel_lock(void) {
+  return spin_lock_irqsave(&g_kernel_lock);
 }
 
-static inline void kernel_unlock(void) {
-  spin_unlock(&g_kernel_lock);
+static inline void kernel_unlock(reg_t sstatus) {
+  spin_unlock_irqrestore(&g_kernel_lock, sstatus);
 }
 
 extern spinlock_t g_log_lock;

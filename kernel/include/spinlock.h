@@ -4,6 +4,7 @@
 #ifndef __ASSEMBLER__  // ← 只有 C/C++ 编译时才看到下面的内容
 
 #include <stdint.h>
+#include "riscv_csr.h"
 
 typedef struct {
   volatile uint32_t locked;  // 0 = unlocked, 1 = locked
@@ -25,8 +26,20 @@ static inline void spin_lock(spinlock_t *lk) {
   } while (tmp != 0);
 }
 
+static inline reg_t spin_lock_irqsave(spinlock_t *lk) {
+  reg_t sstatus = csr_read(sstatus);
+  csr_clear(sstatus, SSTATUS_SIE);
+  spin_lock(lk);
+  return sstatus;
+}
+
 static inline void spin_unlock(spinlock_t *lk) {
   __asm__ volatile("amoswap.w.rl x0, x0, %0\n" : "+A"(lk->locked) : : "memory");
+}
+
+static inline void spin_unlock_irqrestore(spinlock_t *lk, reg_t sstatus) {
+  spin_unlock(lk);
+  csr_write(sstatus, sstatus);
 }
 
 #endif /* !__ASSEMBLER__ */

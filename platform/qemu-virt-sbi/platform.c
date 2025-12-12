@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "log.h"
+#include "riscv_csr.h"
 #include "uart_16550.h"
 #include "goldfish_rtc.h"
 #include "platform.h"
@@ -313,6 +314,6 @@ size_t platform_irq_get_stats(platform_irq_stat_t* out, size_t max) {
 }
 
 void platform_idle(void) {
-  __asm__ volatile("nop");
-  // __asm__ volatile("wfi");
+  csr_set(sstatus, SSTATUS_SIE);
+  __asm__ volatile("wfi");
 }
