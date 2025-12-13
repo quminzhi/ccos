@@ -37,6 +37,11 @@ static void idle_main(void *arg) __attribute__((noreturn));
 
 static uint64_t g_ticks = 0;
 
+static void sched_notify_runnable(void) {
+  if (!smp_boot_done) return;
+  smp_kick_all_others();
+}
+
 /* -------------------------------------------------------------------------- */
 /* Internal helpers                                                           */
 /* -------------------------------------------------------------------------- */
@@ -268,6 +273,7 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name) {
   t->is_user         = KERN_THREAD;
 
   init_thread_context_s(t, entry, arg);
+  sched_notify_runnable();
 
   return tid;
 }
@@ -289,6 +295,7 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
   t->can_be_killed = 1;
 
   init_thread_context_u(t, entry, arg);
+  sched_notify_runnable();
 
   return tid;
 }
@@ -297,12 +304,18 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
 void threads_tick(void) {
   g_ticks++;
 
+  int woke_any = 0;
   for (int i = 0; i < THREAD_MAX; ++i) {
     Thread *t = &g_threads[i];
     if (t->state == THREAD_SLEEPING && t->wakeup_tick <= g_ticks) {
       t->wakeup_tick = 0;
       t->state       = THREAD_RUNNABLE;
+      woke_any       = 1;
     }
+  }
+
+  if (woke_any) {
+    sched_notify_runnable();
   }
 }
 
@@ -314,6 +327,7 @@ struct trapframe *schedule(struct trapframe *tf) {
   ASSERT(tf == cpu_this()->cur_tf);
 
   if (cur->state == THREAD_RUNNING) cur->state = THREAD_RUNNABLE;
+  thread_mark_not_running(cur);
 
   tid_t next_tid = -1;
 
@@ -367,6 +381,7 @@ void thread_wake(tid_t tid) {
   Thread *t = &g_threads[tid];
   if (t->state == THREAD_BLOCKED) {
     t->state = THREAD_RUNNABLE;
+    sched_notify_runnable();
   }
 }
 
@@ -521,12 +536,6 @@ int thread_sys_list(struct u_thread_info *ubuf, int max) {
     dst->last_hart            = t->last_hart;
     dst->migrations           = t->migrations;
     dst->runs                 = t->runs;
-
-    if (t->id < FIRST_TID) {
-      dst->cpu = t->id;  // idle tid == hartid
-    } else {
-      dst->cpu = t->running_hart;
-    }
 
     int j = 0;
     if (t->name) {
