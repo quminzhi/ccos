@@ -5,12 +5,26 @@
 #include "thread.h"
 #include "riscv_csr.h"
 #include "platform.h"
+#include "sbi.h"
+
+enum {
+  HART_BITS_PER_WORD = (int)(sizeof(unsigned long) * 8u),
+  HART_MASK_WORDS =
+      (MAX_HARTS + HART_BITS_PER_WORD - 1) / HART_BITS_PER_WORD,
+};
 
 cpu_t g_cpus[MAX_HARTS];
 uint8_t g_kstack[MAX_HARTS][KSTACK_SIZE];
 
 volatile uint32_t g_boot_hartid = NO_BOOT_HART;
 volatile int smp_boot_done      = 0;
+
+/* 供 IPI 使用的全局 hart mask 缓冲区（放在 BSS，M 态可直接访问）。 */
+static unsigned long g_smp_ipi_mask[HART_MASK_WORDS] __attribute__((aligned(sizeof(unsigned long))));
+
+static inline void smp_set_online(uint32_t hartid) {
+  g_cpus[hartid].online = 1;
+}
 
 void cpu_init_this_hart(uintptr_t hartid) {
   if (hartid >= MAX_HARTS) {
@@ -37,7 +51,7 @@ void cpu_init_this_hart(uintptr_t hartid) {
   /* online 建议：等真正进入 idle/调度点再置 1 更合理
    * 但你现在先置 1 也能跑
    */
-  c->online = 1;
+  smp_set_online((uint32_t)hartid);
 }
 
 void cpu_enter_idle(uint32_t hartid) {
@@ -61,19 +75,23 @@ void cpu_enter_idle(uint32_t hartid) {
   idle->state    = THREAD_RUNNING;
   thread_mark_running(idle, hartid);
 
-  /*
-   * 现在 cpu->cur_tf 已经指向 idle 的 trapframe，可以放心打开中断，
-   * 否则 trap_entry 会在 .Lno_tf 忙等。
-   *
-   * 目前只有 boot hart 负责调度 tick/外设中断，其它 hart 先保持“只运行 idle +
-   * 等待 IPI”的模式，避免它们去重复编程 SBI timer。
-   */
-  arch_enable_timer_interrupts();
-  arch_enable_external_interrupts();
-
+/*
+ * 现在 cpu->cur_tf 已经指向 idle 的 trapframe，可以放心打开中断，
+ * 否则 trap_entry 会在 .Lno_tf 忙等。
+ *
+ * SMP 调度策略（当前版本）：
+ *   - 只有 boot hart 周期性设置下一次 timer tick，并在 tick 中推进全局时间 /
+ *     把 SLEEPING 线程变成 RUNNABLE。
+ *   - 任意 hart 只要让线程变成 RUNNABLE（创建 / 唤醒 / timer），就通过 SBI IPI
+ *     给其它在线 hart 一个 SSIP，把它们从 WFI 拉出来 schedule。
+ *   - 所有 hart 都必须打开 SSIP/SEIP/STIP，这样才能响应 IPI / PLIC / timer。
+ */
   if (hartid == g_boot_hartid) {
     platform_timer_start_after(DELTA_TICKS);
   }
+  arch_enable_timer_interrupts();
+  arch_enable_external_interrupts();
+  arch_enable_software_interrupts();
 
   /* 不会返回：直接按 idle->tf 的 sstatus/sepc sret */
   arch_first_switch(&idle->tf);
@@ -93,4 +111,24 @@ void wait_for_smp_boot_done() {
     __asm__ volatile("wfi");
   }
   smp_mb();
+}
+
+void smp_kick_all_others(void) {
+  if (!smp_boot_done) {
+    return;
+  }
+
+  const uint32_t self = cpu_current_hartid();
+  /* Send one hart at a time to avoid multi-bit mask validation paths. */
+  for (uint32_t hart = 0; hart < (uint32_t)MAX_HARTS; ++hart) {
+    if (hart == self) continue;
+    if (!g_cpus[hart].online) continue;
+
+    /* Base is the target hart; bit0 hits that hart. */
+    struct sbiret ret = sbi_send_ipi(1UL, hart);
+    if (ret.error) {
+      pr_warn("sbi_send_ipi failed: err=%ld target=%u mask=0x%lx\n", ret.error,
+              hart, 1UL);
+    }
+  }
 }

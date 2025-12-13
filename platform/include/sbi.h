@@ -46,6 +46,22 @@ static inline void sbi_set_timer(uint64_t stime_value) {
                  0);
 }
 
+/* ===== IPI Extension (EID "IPI" = 0x735049) ===== */
+
+#define SBI_EID_IPI             0x735049L
+#define SBI_FID_IPI_SEND_IPI    0
+
+/*
+ * send_ipi (SBI v0.2+):
+ *   a0 = hart mask (scalar bits)
+ *   a1 = hart_mask_base (bit0 corresponds to this hartid)
+ */
+static inline struct sbiret sbi_send_ipi(unsigned long hart_mask,
+                                         unsigned long hart_mask_base) {
+  return sbi_call(SBI_EID_IPI, SBI_FID_IPI_SEND_IPI, (long)hart_mask,
+                  (long)hart_mask_base, 0, 0, 0);
+}
+
 /* ===== Debug Console Extension (EID "DBCN" = 0x4442434E) =====
  * FID 0: write, FID 1: read, FID 2: write_byte
  */
