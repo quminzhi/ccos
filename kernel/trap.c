@@ -34,9 +34,8 @@ static void timer_handler(struct trapframe *tf) {
 
   if (c->hartid == g_boot_hartid) {
     threads_tick();
+    platform_timer_start_after(DELTA_TICKS);
   }
-
-  platform_timer_start_after(DELTA_TICKS);
 
   schedule(tf);
 }

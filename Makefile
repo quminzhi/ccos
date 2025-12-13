@@ -22,7 +22,8 @@ CPUS     ?= 1
 # ---------------------------------------------------------------------------
 
 CROSS_COMPILE ?= riscv64-unknown-elf-
-OPENSBI_CROSS_COMPILE ?= riscv64-unknown-linux-gnu-
+#OPENSBI_CROSS_COMPILE ?= riscv64-unknown-linux-gnu-
+OPENSBI_CROSS_COMPILE ?= riscv64-unknown-elf-
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)gcc
@@ -30,7 +31,13 @@ OBJDUMP := $(CROSS_COMPILE)objdump
 NM      := $(CROSS_COMPILE)nm
 SIZE    := $(CROSS_COMPILE)size
 
-GDB     := gdb-multiarch
+UNAME_S := $(shell uname -s)
+
+ifeq ($(UNAME_S),Darwin)
+  GDB := riscv64-elf-gdb
+else
+  GDB := gdb-multiarch
+endif
 
 # ---------------------------------------------------------------------------
 # 目标配置
@@ -167,7 +174,7 @@ endif
 
 all: build
 
-build: $(TARGET) $(DTS) disasm-all symbols objdump-objs size opensbi
+build: $(TARGET) $(DTS) disasm-all symbols objdump-objs size
 
 # 链接规则：注意先保证目录存在
 $(TARGET): $(OBJS)
@@ -243,11 +250,17 @@ OPENSBI_PLATFORM   := generic
 OPENSBI_FW_JUMP     := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.elf
 OPENSBI_FW_JUMP_BIN := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.bin
 
+OPENSBI_DOCKER_CROSS_COMPILE ?= riscv64-linux-gnu-
+OPENSBI_DOCKER_IMAGE ?= opensbi-build:linux-gnu
+OPENSBI_DOCKER_WS    ?= /ws
+PROJECT_ROOT := $(abspath .)
+OPENSBI_DOCKERFILE := $(PROJECT_ROOT)/Dockerfile.opensbi
+
 # ---------------------------------------------------------------------------
 # OpenSBI 构建规则
 # ---------------------------------------------------------------------------
 
-.PHONY: opensbi
+.PHONY: opensbi docker-opensbi
 
 opensbi: $(OPENSBI_FW_JUMP)
 
@@ -259,6 +272,28 @@ $(OPENSBI_FW_JUMP):
 		CROSS_COMPILE=$(OPENSBI_CROSS_COMPILE) \
 		O=$(abspath $(OPENSBI_BUILD_DIR))
 
+docker-opensbi: docker-opensbi-image
+	@echo "  OPENSBI (docker) PLATFORM=$(OPENSBI_PLATFORM) O=$(OPENSBI_BUILD_DIR)"
+	@mkdir -p $(OPENSBI_BUILD_DIR)
+	@docker run --rm -t \
+		-u "$$(id -u):$$(id -g)" \
+		-v "$(PROJECT_ROOT):$(OPENSBI_DOCKER_WS)" \
+		-w "$(OPENSBI_DOCKER_WS)" \
+		"$(OPENSBI_DOCKER_IMAGE)" \
+		bash -lc 'make -C "$(OPENSBI_DIR)" \
+			PLATFORM="$(OPENSBI_PLATFORM)" \
+			CROSS_COMPILE="$(OPENSBI_DOCKER_CROSS_COMPILE)" \
+			O="$(OPENSBI_DOCKER_WS)/$(OPENSBI_BUILD_DIR)"'
+
+docker-opensbi-image:
+	@docker image inspect "$(OPENSBI_DOCKER_IMAGE)" >/dev/null 2>&1 || ( \
+		echo "  DOCKER BUILD $(OPENSBI_DOCKER_IMAGE)"; \
+		docker build -t "$(OPENSBI_DOCKER_IMAGE)" -f "$(OPENSBI_DOCKERFILE)" "$(PROJECT_ROOT)"; \
+	)
+
+docker-opensbi-image-rebuild:
+	@echo "  DOCKER REBUILD $(OPENSBI_DOCKER_IMAGE)"
+	@docker build -t "$(OPENSBI_DOCKER_IMAGE)" -f "$(OPENSBI_DOCKERFILE)" "$(PROJECT_ROOT)"
 
 # ---------------------------------------------------------------------------
 # QEMU 运行配置

@@ -4,6 +4,7 @@
 #include "arch.h"
 #include "thread.h"
 #include "riscv_csr.h"
+#include "platform.h"
 
 cpu_t g_cpus[MAX_HARTS];
 uint8_t g_kstack[MAX_HARTS][KSTACK_SIZE];
@@ -58,8 +59,21 @@ void cpu_enter_idle(uint32_t hartid) {
 
   /* 初始状态：本 CPU 上的 idle 正在跑 */
   idle->state    = THREAD_RUNNING;
-
   thread_mark_running(idle, hartid);
+
+  /*
+   * 现在 cpu->cur_tf 已经指向 idle 的 trapframe，可以放心打开中断，
+   * 否则 trap_entry 会在 .Lno_tf 忙等。
+   *
+   * 目前只有 boot hart 负责调度 tick/外设中断，其它 hart 先保持“只运行 idle +
+   * 等待 IPI”的模式，避免它们去重复编程 SBI timer。
+   */
+  arch_enable_timer_interrupts();
+  arch_enable_external_interrupts();
+
+  if (hartid == g_boot_hartid) {
+    platform_timer_start_after(DELTA_TICKS);
+  }
 
   /* 不会返回：直接按 idle->tf 的 sstatus/sepc sret */
   arch_first_switch(&idle->tf);

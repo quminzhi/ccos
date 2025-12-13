@@ -67,11 +67,6 @@ void primary_main(long hartid, long dtb_pa) {
   set_smp_boot_done();
   start_other_harts(dtb_pa);
 
-  arch_enable_timer_interrupts();
-  arch_enable_external_interrupts();
-
-  platform_timer_start_after(DELTA_TICKS);
-
   pr_info("Kernel built as %s, CPUS=%d, Boot Hart=%ld", KERNEL_BUILD_TYPE,
           MAX_HARTS, (long)hartid);
   pr_info("Boot Hart: system init done.");
@@ -89,12 +84,6 @@ void secondary_main(long hartid, long dtb_pa) {
 
   platform_secondary_hart_init(hartid);
   trap_init();
-
-  arch_enable_timer_interrupts();
-  // arch_enable_external_interrupts();
-
-  // TODO: platform_timer_start_after()，记得要按 hart 配 timer
-  platform_timer_start_after(DELTA_TICKS);
 
   pr_info("hart %ld online (secondary)", cpu_current_hartid());
   cpu_enter_idle((uint32_t)hartid);
