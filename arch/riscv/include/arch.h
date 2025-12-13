@@ -5,6 +5,7 @@
 
 void arch_enable_timer_interrupts(void);
 void arch_enable_external_interrupts(void);
+void arch_enable_software_interrupts(void);
 
 struct trapframe;
 void arch_first_switch(struct trapframe *tf);

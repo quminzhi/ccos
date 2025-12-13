@@ -58,3 +58,4 @@ void cpu_enter_idle(uint32_t hartid);
 
 void set_smp_boot_done();
 void wait_for_smp_boot_done();
+void smp_kick_all_others(void);

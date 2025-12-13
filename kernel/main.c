@@ -51,6 +51,15 @@ static void start_other_harts(long dtb_pa) {
 }
 
 void primary_main(long hartid, long dtb_pa) {
+  /*
+   * 启动流程（专业版小结）：
+   *   1) boot hart: 平台初始化 + 注册 IRQ + trap + 日志 + 时间子系统 + 线程。
+   *   2) boot hart: 标记 smp_boot_done，然后用 SBI HSM 启动其它 hart。
+   *   3) secondary hart: 走 platform_secondary_hart_init() + trap_init()，打开
+   *      SSIP/STIP/SEIP，进入 idle，等待 IPI / timer / PLIC 抢占。
+   *   4) 调度策略：只有 boot hart 周期性 tick；谁让线程 RUNNABLE，谁给其它在线
+   *      hart 发送 IPI（SSIP），把它们从 WFI 拉出来 schedule。
+   */
   platform_init((uintptr_t)hartid, (uintptr_t)dtb_pa);
   platform_boot_hart_init((uintptr_t)hartid);
 

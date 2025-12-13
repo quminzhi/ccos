@@ -17,3 +17,9 @@ void arch_enable_external_interrupts(void)
   csr_set(sie, SIE_SEIE);
   csr_set(sstatus, SSTATUS_SIE);
 }
+
+void arch_enable_software_interrupts(void)
+{
+  csr_set(sie, SIE_SSIE);
+  csr_set(sstatus, SSTATUS_SIE);
+}

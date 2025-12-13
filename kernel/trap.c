@@ -179,6 +179,11 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
 
   if (scause_is_interrupt(scause)) {
     switch (code) {
+      case IRQ_SOFT_S:
+        /* Software interrupt (IPI) */
+        csr_clear(sip, SIP_SSIP);
+        schedule(tf);
+        goto handled;
       case IRQ_TIMER_S:
         /* S-mode timer interrupt */
         timer_handler(tf);  // 可能触发 schedule()
@@ -186,7 +191,6 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
       case IRQ_EXT_S:
         platform_handle_s_external(tf);
         goto handled;
-        /* TODO: 软件中断（IPI）以后可以加在这里 */
       default:
         break;  // 落到下面的“未处理 trap”
     }

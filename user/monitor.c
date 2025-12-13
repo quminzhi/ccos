@@ -29,6 +29,15 @@ typedef struct {
 
 static mon_ctx_t g_mons[MON_MAX];
 
+/* Format a hart id for table output: -1 -> "---". */
+static void fmt_hart(int hart, char *buf, size_t bufsz) {
+  if (hart >= 0) {
+    u_snprintf(buf, bufsz, "%d", hart);
+  } else {
+    u_snprintf(buf, bufsz, "---");
+  }
+}
+
 static int mon_filter_pass(const mon_ctx_t *m, const struct u_thread_info *ti) {
   if ((m->flags & MON_F_USER_ONLY) && !ti->is_user) {
     return 0;
@@ -57,24 +66,14 @@ static void print_threads_table(const mon_ctx_t *m,
     const char *st = thread_state_name(ti->state);
     char mode      = ti->is_user ? 'U' : 'S';
 
-    /* cpu / last_hart: -1 => --- */
-    if (ti->cpu >= 0 && ti->last_hart >= 0) {
-      u_printf(" %-4d %-9s  %c   %-3d %-4d %6u %9llu %s\n", ti->tid, st, mode,
-               ti->cpu, ti->last_hart, (unsigned)ti->migrations,
-               (unsigned long long)ti->runs, ti->name);
-    } else if (ti->cpu >= 0 && ti->last_hart < 0) {
-      u_printf(" %-4d %-9s  %c   %-3d %-4s %6u %9llu %s\n", ti->tid, st, mode,
-               ti->cpu, "---", (unsigned)ti->migrations,
-               (unsigned long long)ti->runs, ti->name);
-    } else if (ti->cpu < 0 && ti->last_hart >= 0) {
-      u_printf(" %-4d %-9s  %c   %-3s %-4d %6u %9llu %s\n", ti->tid, st, mode,
-               "---", ti->last_hart, (unsigned)ti->migrations,
-               (unsigned long long)ti->runs, ti->name);
-    } else {
-      u_printf(" %-4d %-9s  %c   %-3s %-4s %6u %9llu %s\n", ti->tid, st, mode,
-               "---", "---", (unsigned)ti->migrations,
-               (unsigned long long)ti->runs, ti->name);
-    }
+    char cpu_s[4];
+    char last_s[5];
+    fmt_hart(ti->cpu, cpu_s, sizeof(cpu_s));
+    fmt_hart(ti->last_hart, last_s, sizeof(last_s));
+
+    u_printf(" %-4d %-9s  %c   %-3s %-4s %6u %9llu %s\n", ti->tid, st, mode,
+             cpu_s, last_s, (unsigned)ti->migrations,
+             (unsigned long long)ti->runs, ti->name);
   }
 }
 
