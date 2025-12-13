@@ -56,11 +56,12 @@ void thread_mark_running(Thread *t, uint32_t hartid) {
   if (t->last_hart >= 0 && t->last_hart != (int32_t)hartid) {
     t->migrations++;
   }
-
-  t->last_hart = (int32_t)hartid;
 }
 
 void thread_mark_not_running(Thread *t) {
+  if (t->running_hart >= 0) {
+    t->last_hart = t->running_hart;
+  }
   t->running_hart = -1;
 }
 
