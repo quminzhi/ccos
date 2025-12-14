@@ -142,6 +142,9 @@ static void syscall_handler(struct trapframe *tf) {
     case SYS_YIELD:
       thread_sys_yield(tf);
       break;
+    case SYS_THREAD_DETACH:
+      thread_sys_detach(tf, (tid_t)tf->a1);
+      break;
     default:
       dump_trap(tf);
       panic("unknown syscall");

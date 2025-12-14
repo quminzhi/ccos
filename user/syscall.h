@@ -23,6 +23,7 @@ void thread_exit(int exit_code) __attribute__((noreturn));
 
 int thread_list(struct u_thread_info *buf, int max);  // Count returned or <0 on error.
 int thread_kill(tid_t tid);                           // 0 on success, <0 on error.
+int thread_detach(tid_t tid);                         // 0 on success, <0 on error.
 
 // clock_id support CLOCK_REALTIME(0) only
 int clock_gettime(int clock_id, struct timespec *ts);

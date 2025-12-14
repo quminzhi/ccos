@@ -31,6 +31,7 @@ typedef struct Thread {
   const char *name;
   int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
   int can_be_killed;
+  int detached; /* 1 = detached, auto-recycle on exit/kill */
 
   /* --- SMP debug/metrics --- */
   int32_t  running_hart;   // -1 not running; >=0 running on that hart
@@ -114,6 +115,7 @@ void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
                        const char *name);
 int thread_sys_list(struct u_thread_info *ubuf, int max);
 void thread_sys_kill(struct trapframe *tf, tid_t target_tid);
+void thread_sys_detach(struct trapframe *tf, tid_t target_tid);
 
 /* -------------------------------------------------------------------------- */
 /* Introspection / utils                                                      */

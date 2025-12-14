@@ -97,6 +97,15 @@ int thread_kill(tid_t tid)
   return (int)a0;
 }
 
+int thread_detach(tid_t tid)
+{
+  register uintptr_t a0 asm("a0") = SYS_THREAD_DETACH;
+  register uintptr_t a1 asm("a1") = (uintptr_t)tid;
+
+  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : : "memory");
+  return (int)a0;
+}
+
 int clock_gettime(int clock_id, struct timespec *ts)
 {
   register uintptr_t a0 asm("a0") = SYS_CLOCK_GETTIME;  // syscall number

@@ -128,6 +128,8 @@ static int spawn_add(spawn_mode_t mode, uint32_t sleep_ticks,
 
   tid_t tid = thread_create(spawn_worker, c, names[wid]);
   if (tid < 0) return -2;
+  /* Spawned workers are fire-and-forget: detach to auto-recycle. */
+  thread_detach(tid);
 
   c->tid = (int)tid;
   s_spawn_count++;

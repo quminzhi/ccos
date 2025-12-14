@@ -10,3 +10,13 @@ void rq_init_all(void);
 void rq_push_tail(uint32_t hartid, tid_t tid);
 tid_t rq_pop_head(uint32_t hartid);
 uint32_t rq_len(uint32_t hartid);
+
+/* Remove a specific tid from a hart's runqueue.
+ * Returns 0 on success, -1 if not found/invalid.
+ */
+int rq_remove(uint32_t hartid, tid_t tid);
+
+/* Remove tid from whichever hart runqueue contains it.
+ * Returns hartid (>=0) on success, -1 if not found.
+ */
+int rq_remove_any(tid_t tid);

@@ -163,10 +163,17 @@ static void recycle_thread(tid_t tid) {
     return; /* Leave idle/main slots untouched. */
   }
 
+  if (g_stdin_waiter == tid) {
+    g_stdin_waiter = -1;
+  }
+
   Thread *t          = &g_threads[tid];
   t->state           = THREAD_UNUSED;
   t->wakeup_tick     = 0;
   t->name            = "unused";
+  t->is_user         = 0;
+  t->can_be_killed   = 0;
+  t->detached        = 0;
   t->exit_code       = 0;
   t->join_waiter     = -1;
   t->waiting_for     = -1;
@@ -177,6 +184,9 @@ static void recycle_thread(tid_t tid) {
   t->last_hart    = -1;
   t->migrations   = 0;
   t->runs         = 0;
+  t->rq_next      = -1;
+  t->on_rq        = 0;
+  t->bound_hart   = -1;
   /* The stack array g_thread_stacks[tid] stays allocated for reuse. */
 }
 
@@ -234,6 +244,7 @@ void threads_init(thread_entry_t user_main) {
     g_threads[i].name             = "unused";
     g_threads[i].stack_base       = NULL;
     g_threads[i].can_be_killed    = 0;
+    g_threads[i].detached         = 0;
     g_threads[i].exit_code        = 0;
     g_threads[i].join_waiter      = -1;
     g_threads[i].waiting_for      = -1;
@@ -290,6 +301,7 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name) {
   t->name            = name ? name : "thread";
   t->stack_base      = g_thread_stacks[tid];
   t->exit_code       = 0;
+  t->detached        = 0;
   t->join_waiter     = -1;
   t->waiting_for     = -1;
   t->join_status_ptr = 0;
@@ -316,6 +328,7 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
   t->stack_base    = g_thread_stacks[tid];
   t->is_user       = USER_THREAD;
   t->can_be_killed = 1;
+  t->detached      = 0;
 
   init_thread_context_u(t, entry, arg);
   thread_make_runnable(tid, cpu_current_hartid());
@@ -351,10 +364,29 @@ struct trapframe *schedule(struct trapframe *tf) {
     rq_push_tail(c->hartid, cur_tid);
   }
   thread_mark_not_running(cur);
+  if (cur_is_idle) {
+    cur->state = THREAD_RUNNABLE;  // idle 不在 rq，但状态反映“可随时运行”
+  }
 
-  tid_t next_tid = rq_pop_head(c->hartid);
-  if (next_tid < 0) {
-    next_tid = c->idle_tid;
+  /* 如果当前线程已退出（例如被 kill），并且已经有 joiner，切走时才安全回收。 */
+  if (!cur_is_idle && cur->state == THREAD_ZOMBIE &&
+      ((cur->join_waiter >= 0 && cur->join_waiter < THREAD_MAX) ||
+       cur->detached)) {
+    recycle_thread(cur_tid);
+  }
+
+  /* 只运行 RUNNABLE 的线程；异常/过期节点直接丢弃（不再让其“复活”）。 */
+  tid_t next_tid;
+  for (;;) {
+    next_tid = rq_pop_head(c->hartid);
+    if (next_tid < 0) {
+      next_tid = c->idle_tid;
+      break;
+    }
+    Thread *cand = &g_threads[next_tid];
+    if (cand->state == THREAD_RUNNABLE) {
+      break;
+    }
   }
 
   c->current_tid = next_tid;
@@ -455,9 +487,7 @@ void thread_sys_exit(struct trapframe *tf, int exit_code) {
     /* Clear wait relationships and wake the joiner. */
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
-    if (w->state == THREAD_WAITING) {
-      w->state = THREAD_RUNNABLE;
-    }
+    thread_make_runnable(joiner, cpu_current_hartid());
 
     /* If a joiner exists, recycle immediately to avoid lingering ZOMBIE. */
     recycle_thread(self_tid);
@@ -496,8 +526,18 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
     return;
   }
 
+  if (t->detached) {
+    tf->a0 = -5; /* EINVAL: detached threads are not joinable. */
+    return;
+  }
+
   /* Target already ZOMBIE: recycle immediately and return. */
   if (t->state == THREAD_ZOMBIE) {
+    /* If someone else is/was joining it, do not allow a second joiner. */
+    if (t->join_waiter >= 0 && t->join_waiter != cur_tid) {
+      tf->a0 = -4; /* EBUSY: some other thread is joining it. */
+      return;
+    }
     if (status_ptr != 0) {
       int *p = (int *)status_ptr;
       *p     = t->exit_code;
@@ -605,6 +645,22 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
   /* Force ZOMBIE state (SIGKILL semantics). */
   t->exit_code = THREAD_EXITCODE_SIGKILL;  // Usually -9.
   t->state     = THREAD_ZOMBIE;
+  t->wakeup_tick = 0;
+
+  /* Ensure it can't be scheduled again from any runqueue. */
+  if (t->on_rq) {
+    rq_remove_any(target_tid);
+  }
+
+  /* If it's currently running elsewhere, kick that hart so it switches away. */
+  if (t->running_hart >= 0 && t->running_hart < (int32_t)MAX_HARTS) {
+    uint32_t rh = (uint32_t)t->running_hart;
+    if (rh != cpu_current_hartid()) {
+      smp_kick_hart(rh);
+    } else {
+      cpu_this()->need_resched = 1;
+    }
+  }
 
   /* If there is a joiner, reuse the normal exit logic for it. */
   if (joiner >= 0 && joiner < THREAD_MAX) {
@@ -621,18 +677,65 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
     /* Clear wait state and wake the joiner. */
     w->waiting_for     = -1;
     w->join_status_ptr = 0;
-    if (w->state == THREAD_WAITING) {
-      w->state = THREAD_RUNNABLE;
-    }
+    thread_make_runnable(joiner, cpu_current_hartid());
 
-    /* Immediately recycle the killed thread's slot when a joiner exists. */
+    /* Only recycle when we can guarantee the victim is no longer executing. */
+    if (t->running_hart < 0 && !t->on_rq) {
+      recycle_thread(target_tid);
+    } else {
+      /* Defer: schedule() will recycle when switching away from it. */
+      t->join_waiter = joiner;
+    }
+  }
+
+  if (joiner < 0) {
+    t->join_waiter = -1;
+  }
+
+  if (joiner < 0 && t->detached && t->running_hart < 0 && !t->on_rq) {
     recycle_thread(target_tid);
   }
 
-  t->join_waiter = -1;
-
   /* kill syscall returns 0 to indicate success. */
   tf->a0         = 0;
+}
+
+void thread_sys_detach(struct trapframe *tf, tid_t target_tid) {
+  if (target_tid <= 0 || target_tid >= THREAD_MAX) {
+    tf->a0 = -1; /* EINVAL */
+    return;
+  }
+
+  Thread *t = &g_threads[target_tid];
+
+  if (t->state == THREAD_UNUSED) {
+    tf->a0 = -3; /* ESRCH */
+    return;
+  }
+
+  if (target_tid < (tid_t)MAX_HARTS) {
+    tf->a0 = -2; /* Do not detach idle. */
+    return;
+  }
+
+  if (t->join_waiter >= 0) {
+    tf->a0 = -4; /* EBUSY: someone is joining it. */
+    return;
+  }
+
+  if (t->detached) {
+    tf->a0 = 0;
+    return;
+  }
+
+  t->detached = 1;
+
+  /* If it is already ZOMBIE, recycle now; otherwise, exit/kill will clean it. */
+  if (t->state == THREAD_ZOMBIE) {
+    recycle_thread(target_tid);
+  }
+
+  tf->a0 = 0;
 }
 
 /* -------------------------------------------------------------------------- */

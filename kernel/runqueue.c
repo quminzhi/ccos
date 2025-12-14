@@ -74,3 +74,46 @@ uint32_t rq_len(uint32_t hartid) {
   if (hartid >= (uint32_t)MAX_HARTS) return 0;
   return rq(hartid)->len;
 }
+
+int rq_remove(uint32_t hartid, tid_t tid) {
+  if (hartid >= (uint32_t)MAX_HARTS) return -1;
+  if (tid < 0 || tid >= THREAD_MAX) return -1;
+
+  runqueue_t* r = rq(hartid);
+  tid_t cur     = r->head;
+  tid_t prev    = -1;
+
+  while (cur >= 0) {
+    if (cur == tid) {
+      Thread* t = &g_threads[cur];
+      tid_t nxt = t->rq_next;
+
+      if (prev < 0) {
+        r->head = nxt;
+      } else {
+        g_threads[prev].rq_next = nxt;
+      }
+      if (r->tail == cur) {
+        r->tail = prev;
+      }
+
+      t->rq_next = -1;
+      t->on_rq   = 0;
+      if (r->len > 0) r->len--;
+      return 0;
+    }
+    prev = cur;
+    cur  = g_threads[cur].rq_next;
+  }
+  return -1;
+}
+
+int rq_remove_any(tid_t tid) {
+  if (tid < 0 || tid >= THREAD_MAX) return -1;
+  for (uint32_t h = 0; h < (uint32_t)MAX_HARTS; ++h) {
+    if (rq_remove(h, tid) == 0) {
+      return (int)h;
+    }
+  }
+  return -1;
+}

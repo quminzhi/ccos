@@ -13,7 +13,8 @@ enum {
   SYS_CLOCK_GETTIME = 9,
   SYS_IRQ_GET_STATS = 10,
   SYS_GET_HARTID    = 11,
-  SYS_YIELD         = 12
+  SYS_YIELD         = 12,
+  SYS_THREAD_DETACH = 13
 };
 
 #endif // SYSCALL_NO_H
