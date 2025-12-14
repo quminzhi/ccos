@@ -386,7 +386,7 @@ cmd_rq(int argc, char** argv)
     for (uint32_t k = 0; k < s->len; ++k) {
       u_printf("%d", (int)s->tids[k]);
       if (k + 1 < s->len) {
-        u_puts(" -> ");
+        u_printf(" -> ");
       }
     }
     u_printf("\n");

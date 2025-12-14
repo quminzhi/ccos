@@ -107,7 +107,8 @@ spawn_usage(void)
       "  spawn list\n"
       "  spawn kill\n"
       "notes:\n"
-      "  - print_every is in 'iterations' (not ticks). default=50\n"
+      "  - print_every is in 'iterations' (not ticks)\n"
+      "  - print_every=0 disables all worker logs; default spin=0, others=50\n"
       "  - N is capped to SPAWN_MAX\n");
 }
 
@@ -124,7 +125,7 @@ spawn_add(spawn_mode_t mode, uint32_t sleep_ticks, uint32_t print_every,
   c->tid         = -1;
   c->mode        = mode;
   c->sleep_ticks = sleep_ticks;
-  c->print_every = (print_every == 0) ? 50 : print_every;
+  c->print_every = print_every;  /* 0 disables printing. */
 
   /* Adjust work_loops depending on performance: too small spams logs, */
   /* too large hides migration behavior. */
@@ -195,9 +196,8 @@ spawn(int argc, char** argv)
   if (n <= 0) n = 1;
   if (n > SPAWN_MAX) n = SPAWN_MAX;
 
-  uint32_t print_every = 50;
-
   if (!u_strcmp(sub, "spin")) {
+    uint32_t print_every = 0;
     if (argc >= 4) print_every = (uint32_t)u_atoi(argv[3]);
 
     for (int i = 0; i < n; ++i) {
@@ -206,12 +206,15 @@ spawn(int argc, char** argv)
         u_puts("spawn: create failed\n");
         break;
       }
-      u_printf("spawn: spin wid=%d tid=%d\n", s_spawn_count - 1, tid);
+      if (print_every) {
+        u_printf("spawn: spin wid=%d tid=%d\n", s_spawn_count - 1, tid);
+      }
     }
     return;
   }
 
   if (!u_strcmp(sub, "yield")) {
+    uint32_t print_every = 50;
     if (argc >= 4) print_every = (uint32_t)u_atoi(argv[3]);
 
     for (int i = 0; i < n; ++i) {
@@ -226,6 +229,7 @@ spawn(int argc, char** argv)
   }
 
   if (!u_strcmp(sub, "sleep")) {
+    uint32_t print_every = 50;
     if (argc < 4) {
       spawn_usage();
       return;
