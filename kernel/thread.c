@@ -8,6 +8,8 @@
 #include "platform.h"
 #include "riscv_csr.h"
 #include "cpu.h"
+#include "runqueue.h"
+#include "sched.h"
 
 extern tid_t g_stdin_waiter;
 void *memset(void *s, int c, size_t n); /* string.h */
@@ -37,9 +39,24 @@ static void idle_main(void *arg) __attribute__((noreturn));
 
 static uint64_t g_ticks = 0;
 
-static void sched_notify_runnable(void) {
-  if (!smp_boot_done) return;
-  smp_kick_all_others();
+/* 让 tid 变成 RUNNABLE 并放入一个 hart 的 runqueue，必要时 kick 目标 hart。 */
+void thread_make_runnable(tid_t tid, uint32_t preferred_hart) {
+  if (tid < 0 || tid >= THREAD_MAX) return;
+  if (tid < (tid_t)MAX_HARTS) return;  // idle 不入 rq
+
+  Thread *t = &g_threads[tid];
+  if (t->on_rq || t->state == THREAD_RUNNING) return;
+
+  uint32_t target = sched_pick_target_hart(tid, preferred_hart);
+  t->state        = THREAD_RUNNABLE;
+  t->wakeup_tick  = 0;
+  rq_push_tail(target, tid);
+
+  if (target == cpu_current_hartid()) {
+    cpu_this()->need_resched = 1;
+  } else {
+    smp_kick_hart(target);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -228,8 +245,13 @@ void threads_init(thread_entry_t user_main) {
     g_threads[i].last_hart        = -1;
     g_threads[i].migrations       = 0;
     g_threads[i].runs             = 0;
+    g_threads[i].rq_next          = -1;
+    g_threads[i].on_rq            = 0;
+    g_threads[i].bound_hart       = -1;
     tf_clear(&g_threads[i].tf);
   }
+
+  rq_init_all();
 
   // prepare idle thread (idle tid = hartid)
   for (uint32_t hid = 0; hid < (uint32_t)MAX_HARTS; ++hid) {
@@ -274,7 +296,7 @@ tid_t thread_create_kern(thread_entry_t entry, void *arg, const char *name) {
   t->is_user         = KERN_THREAD;
 
   init_thread_context_s(t, entry, arg);
-  sched_notify_runnable();
+  thread_make_runnable(tid, cpu_current_hartid());
 
   return tid;
 }
@@ -296,7 +318,7 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
   t->can_be_killed = 1;
 
   init_thread_context_u(t, entry, arg);
-  sched_notify_runnable();
+  thread_make_runnable(tid, cpu_current_hartid());
 
   return tid;
 }
@@ -305,18 +327,12 @@ static tid_t thread_create_user(thread_entry_t entry, void *arg,
 void threads_tick(void) {
   g_ticks++;
 
-  int woke_any = 0;
   for (int i = 0; i < THREAD_MAX; ++i) {
     Thread *t = &g_threads[i];
     if (t->state == THREAD_SLEEPING && t->wakeup_tick <= g_ticks) {
       t->wakeup_tick = 0;
-      t->state       = THREAD_RUNNABLE;
-      woke_any       = 1;
+      thread_make_runnable((tid_t)i, g_boot_hartid);
     }
-  }
-
-  if (woke_any) {
-    sched_notify_runnable();
   }
 }
 
@@ -327,32 +343,26 @@ struct trapframe *schedule(struct trapframe *tf) {
 
   ASSERT(tf == cpu_this()->cur_tf);
 
-  if (cur->state == THREAD_RUNNING) cur->state = THREAD_RUNNABLE;
+  const int cur_is_idle = (cur_tid == c->idle_tid);
+
+  /* 当前运行线程如果仍可运行且非 idle，则放回本地 runqueue 尾部。 */
+  if (!cur_is_idle && cur->state == THREAD_RUNNING) {
+    cur->state = THREAD_RUNNABLE;
+    rq_push_tail(c->hartid, cur_tid);
+  }
   thread_mark_not_running(cur);
 
-  tid_t next_tid = -1;
-
-  for (int off = 1; off < THREAD_MAX; ++off) {
-    tid_t cand = (cur_tid + off) % THREAD_MAX;
-    if (cand < FIRST_TID) continue;  // Skip idle tids.
-    if (g_threads[cand].state == THREAD_RUNNABLE) {
-      next_tid = cand;
-      break;
-    }
-  }
-
-  // If currently running a normal thread, keep executing it.
+  tid_t next_tid = rq_pop_head(c->hartid);
   if (next_tid < 0) {
-    if (cur_tid >= FIRST_TID && cur->state == THREAD_RUNNABLE) {
-      next_tid = cur_tid;
-    } else {
-      next_tid = c->idle_tid;
-    }
+    next_tid = c->idle_tid;
   }
 
   c->current_tid = next_tid;
   Thread *next   = &g_threads[next_tid];
   next->state    = THREAD_RUNNING;
+
+  c->slice_left   = SCHED_SLICE_TICKS;
+  c->need_resched = 0;
 
   if (next_tid != cur_tid) c->ctx_switches++;
   thread_mark_running(next, c->hartid);
@@ -381,8 +391,7 @@ void thread_wake(tid_t tid) {
   }
   Thread *t = &g_threads[tid];
   if (t->state == THREAD_BLOCKED) {
-    t->state = THREAD_RUNNABLE;
-    sched_notify_runnable();
+    thread_make_runnable(tid, cpu_current_hartid());
   }
 }
 
@@ -402,6 +411,8 @@ void thread_sys_sleep(struct trapframe *tf, uint64_t ticks) {
 
   cur->state       = THREAD_SLEEPING;
   cur->wakeup_tick = g_ticks + ticks;
+  cur->on_rq       = 0;
+  cur->rq_next     = -1;
 
   schedule(tf);
 }
@@ -426,6 +437,8 @@ void thread_sys_exit(struct trapframe *tf, int exit_code) {
   cur->tf        = *tf;
   cur->exit_code = exit_code;
   cur->state     = THREAD_ZOMBIE;
+  cur->on_rq     = 0;
+  cur->rq_next   = -1;
 
   if (joiner >= 0 && joiner < THREAD_MAX) {
     Thread *w = &g_threads[joiner];

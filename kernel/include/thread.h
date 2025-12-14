@@ -20,7 +20,7 @@
 #define THREAD_STACK_SIZE 4096
 #endif
 
-#define DELTA_TICKS 1000000UL /* ~0.1s */
+#define DELTA_TICKS 100000UL /* ~10ms at 10MHz timebase */
 
 // #define DELTA_TICKS 10000000UL /* ~1s */
 
@@ -37,6 +37,11 @@ typedef struct Thread {
   int32_t  last_hart;      // -1 never ran;  >=0 last hart it ran on
   uint32_t migrations;     // number of migrations
   uint64_t runs;           // number of tim
+
+  /* runqueue metadata */
+  tid_t    rq_next;    // 单向链表 next
+  uint8_t  on_rq;      // 是否在某个 runqueue 上
+  int32_t  bound_hart; // -1=不绑；>=0=绑定到特定 hart
 
   struct trapframe tf; /* 保存的寄存器上下文 */
 
@@ -128,5 +133,8 @@ void thread_read_from_stdin(console_reader_t reader);
 
 void thread_mark_running(Thread *t, uint32_t hartid);
 void thread_mark_not_running(Thread *t);
+
+/* 把 tid 变为 RUNNABLE 并放入目标 hart 的 runqueue；内部会决定是否发 IPI。 */
+void thread_make_runnable(tid_t tid, uint32_t preferred_hart);
 
 #endif /* THREAD_H */

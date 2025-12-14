@@ -28,6 +28,10 @@ struct cpu {
 
   uint64_t timer_irqs;
   uint64_t ctx_switches;
+
+  /* 调度相关（Phase1 用于时间片/need_resched） */
+  uint32_t need_resched;
+  uint32_t slice_left;
 };
 
 typedef struct cpu cpu_t;
@@ -59,3 +63,4 @@ void cpu_enter_idle(uint32_t hartid);
 void set_smp_boot_done();
 void wait_for_smp_boot_done();
 void smp_kick_all_others(void);
+void smp_kick_hart(uint32_t hartid);

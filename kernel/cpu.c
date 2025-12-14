@@ -6,6 +6,7 @@
 #include "riscv_csr.h"
 #include "platform.h"
 #include "sbi.h"
+#include "sched.h"
 
 enum {
   HART_BITS_PER_WORD = (int)(sizeof(unsigned long) * 8u),
@@ -52,6 +53,9 @@ void cpu_init_this_hart(uintptr_t hartid) {
    * 但你现在先置 1 也能跑
    */
   smp_set_online((uint32_t)hartid);
+
+  /* 依赖 tp 指向当前 cpu 的 sched 初始化（时间片、need_resched 等）。 */
+  sched_init_this_hart((uint32_t)hartid);
 }
 
 void cpu_enter_idle(uint32_t hartid) {
@@ -75,20 +79,17 @@ void cpu_enter_idle(uint32_t hartid) {
   idle->state    = THREAD_RUNNING;
   thread_mark_running(idle, hartid);
 
-/*
- * 现在 cpu->cur_tf 已经指向 idle 的 trapframe，可以放心打开中断，
- * 否则 trap_entry 会在 .Lno_tf 忙等。
- *
- * SMP 调度策略（当前版本）：
- *   - 只有 boot hart 周期性设置下一次 timer tick，并在 tick 中推进全局时间 /
- *     把 SLEEPING 线程变成 RUNNABLE。
- *   - 任意 hart 只要让线程变成 RUNNABLE（创建 / 唤醒 / timer），就通过 SBI IPI
- *     给其它在线 hart 一个 SSIP，把它们从 WFI 拉出来 schedule。
- *   - 所有 hart 都必须打开 SSIP/SEIP/STIP，这样才能响应 IPI / PLIC / timer。
- */
-  if (hartid == g_boot_hartid) {
-    platform_timer_start_after(DELTA_TICKS);
-  }
+  /*
+   * 现在 cpu->cur_tf 已经指向 idle 的 trapframe，可以放心打开中断，
+   * 否则 trap_entry 会在 .Lno_tf 忙等。
+   *
+   * SMP 调度策略（当前版本）：
+   *   - 每个 hart 都设置自己的 timer tick（硬抢占用）。
+   *   - boot hart 在 tick 里推进全局时间 / 唤醒 SLEEPING。
+   *   - 任意 hart 把线程变 RUNNABLE 时，若目标 hart 不是自己则发 IPI（SSIP）。
+   *   - 所有 hart 必须打开 SSIP/SEIP/STIP。
+   */
+  platform_timer_start_after(DELTA_TICKS);
   arch_enable_timer_interrupts();
   arch_enable_external_interrupts();
   arch_enable_software_interrupts();
@@ -130,5 +131,16 @@ void smp_kick_all_others(void) {
       pr_warn("sbi_send_ipi failed: err=%ld target=%u mask=0x%lx\n", ret.error,
               hart, 1UL);
     }
+  }
+}
+
+void smp_kick_hart(uint32_t hartid) {
+  if (!smp_boot_done) return;
+  if (hartid >= (uint32_t)MAX_HARTS) return;
+  if (!g_cpus[hartid].online) return;
+
+  struct sbiret ret = sbi_send_ipi(1UL, hartid);
+  if (ret.error) {
+    pr_warn("sbi_send_ipi failed: err=%ld target=%u\n", ret.error, hartid);
   }
 }

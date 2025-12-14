@@ -12,6 +12,8 @@
 #include "sysfile.h"
 #include "lock.h"
 #include "cpu.h"
+#include "sched.h"
+#include "sched.h"
 
 #ifndef NDEBUG
 extern void print_thread_prefix(void);
@@ -26,18 +28,6 @@ void trap_init(void) {
   reg_t val  = addr & ~((reg_t)STVEC_MODE_MASK);
   val |= STVEC_MODE_DIRECT;
   csr_write(stvec, val);
-}
-
-static void timer_handler(struct trapframe *tf) {
-  cpu_t *c = cpu_this();
-  c->timer_irqs++;
-
-  if (c->hartid == g_boot_hartid) {
-    threads_tick();
-    platform_timer_start_after(DELTA_TICKS);
-  }
-
-  schedule(tf);
 }
 
 static void breakpoint_handler(struct trapframe *tf) {
@@ -181,12 +171,11 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
     switch (code) {
       case IRQ_SOFT_S:
         /* Software interrupt (IPI) */
-        csr_clear(sip, SIP_SSIP);
-        schedule(tf);
+        sched_on_ipi_irq(tf);
         goto handled;
       case IRQ_TIMER_S:
         /* S-mode timer interrupt */
-        timer_handler(tf);  // 可能触发 schedule()
+        sched_on_timer_irq(tf);  // 内部可能调用 schedule()
         goto handled;
       case IRQ_EXT_S:
         platform_handle_s_external(tf);
