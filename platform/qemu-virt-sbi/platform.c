@@ -1,4 +1,4 @@
-// platform/qemu-virt-sbi/platform.c
+/* platform/qemu-virt-sbi/platform.c */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -11,7 +11,7 @@
 #include "timer.h"
 #include "panic.h"
 
-static const void* g_dtb;  // 全局 DTB 指针
+static const void* g_dtb;  /* 全局 DTB 指针 */
 
 const void* platform_get_dtb(void) {
   return g_dtb;
@@ -44,10 +44,10 @@ void platform_put_dec_us(uint64_t x);
 
 void platform_put_dec_s(int64_t v) {
   if (v < 0) {
-    // 先输出负号
+    /* 先输出负号 */
     platform_write("-", 1);
 
-    // 处理负数的绝对值，注意 INT64_MIN 的情况不能直接 -v
+    /* 处理负数的绝对值，注意 INT64_MIN 的情况不能直接 -v */
     uint64_t mag = (uint64_t)(-(v + 1)) + 1;
     platform_put_dec_us(mag);
   } else {
@@ -56,8 +56,8 @@ void platform_put_dec_s(int64_t v) {
 }
 
 void platform_put_dec_us(uint64_t x) {
-  // uint64_t 最大是 18446744073709551615，一共 20 位十进制
-  char buf[20 + 1];  // 20 digits + '\0'
+  /* uint64_t 最大是 18446744073709551615，一共 20 位十进制 */
+  char buf[20 + 1];  /* 20 digits + '\0' */
   int pos = 0;
 
   if (x == 0) {
@@ -66,15 +66,15 @@ void platform_put_dec_us(uint64_t x) {
     char tmp[20];
     int len = 0;
 
-    // 先把数字倒着存到 tmp 里
+    /* 先把数字倒着存到 tmp 里 */
     while (x > 0) {
       uint64_t q = x / 10;
-      uint32_t r = (uint32_t)(x - q * 10);  // 等价于 x % 10，但少一次除法
+      uint32_t r = (uint32_t)(x - q * 10);  /* 等价于 x % 10，但少一次除法 */
       tmp[len++] = (char)('0' + r);
       x          = q;
     }
 
-    // 再倒过来写入 buf
+    /* 再倒过来写入 buf */
     for (int i = len - 1; i >= 0; --i) {
       buf[pos++] = tmp[i];
     }
@@ -85,7 +85,7 @@ void platform_put_dec_us(uint64_t x) {
 }
 
 void platform_put_hex64(uint64_t x) {
-  char buf[2 + 16 + 1];  // "0x" + 16 hex + '\0'
+  char buf[2 + 16 + 1];  /* "0x" + 16 hex + '\0' */
   int pos    = 0;
 
   buf[pos++] = '0';
@@ -159,10 +159,10 @@ typedef struct {
 } irq_entry_t;
 
 typedef struct {
-  uint64_t count;              // 触发次数
-  platform_time_t last_tick;   // 上次触发的 tick
-  platform_time_t first_tick;  // 第一次触发
-  platform_time_t max_delta;   // 相邻两次最大间隔（可选）
+  uint64_t count;              /* 触发次数 */
+  platform_time_t last_tick;   /* 上次触发的 tick */
+  platform_time_t first_tick;  /* 第一次触发 */
+  platform_time_t max_delta;   /* 相邻两次最大间隔（可选） */
 } irq_stat_t;
 
 static irq_entry_t s_irq_table[MAX_IRQ];
@@ -230,7 +230,7 @@ void platform_handle_s_external(struct trapframe* tf) {
 /* ========== PLIC & IRQ ========== */
 
 void platform_plic_init(void) {
-  // 1. S-mode PLIC context
+  /* 1. S-mode PLIC context */
   plic_init_s_mode();
 }
 
@@ -261,39 +261,39 @@ void platform_secondary_hart_init(uintptr_t hartid) {
   (void)hartid;
   ASSERT(g_dtb != NULL);
 
-  // 2. （可选）每核的 timer 初始化
-  //
-  //    当前阶段：你的调度 tick 都跑在 boot hart 上，其它核基本只跑 idle +
-  //    未来的 IPI。 所以可以先不在 secondary 上初始化 timer，等你做 per-CPU
-  //    timer/调度时再打开。
-  //
-  //    如果你之后把 timer 拆成 per-hart 的，这里可以写：
-  //      platform_timer_init_this_hart(hartid);
-  //
-  //    现在先保守一点：不调用，避免和 boot hart 的用法搞混。
-  // platform_timer_init(hartid);
+  /* 2. （可选）每核的 timer 初始化 */
+  /* */
+  /*    当前阶段：你的调度 tick 都跑在 boot hart 上，其它核基本只跑 idle + */
+  /*    未来的 IPI。 所以可以先不在 secondary 上初始化 timer，等你做 per-CPU */
+  /*    timer/调度时再打开。 */
+  /* */
+  /*    如果你之后把 timer 拆成 per-hart 的，这里可以写： */
+  /*      platform_timer_init_this_hart(hartid); */
+  /* */
+  /*    现在先保守一点：不调用，避免和 boot hart 的用法搞混。 */
+  /* platform_timer_init(hartid); */
 
-  // 3. 为“当前 hart”初始化自己的 S-mode PLIC context
-  //
-  //    这一步做的事情是：
-  //      - threshold = 0（允许所有优先级中断）
-  //      - SENABLE 清零（初始不使能任何 IRQ）
-  //
-  //    注意：
-  //      - 不要在这里调用 platform_irq_table_init()
-  //        否则会把 boot hart 注册好的 handler 清空。
-  //      - 不需要在这里重复注册 UART / RTC 的 handler；
-  //        那些是“源级别”的，全局一套就够。
-  //
+  /* 3. 为“当前 hart”初始化自己的 S-mode PLIC context */
+  /* */
+  /*    这一步做的事情是： */
+  /*      - threshold = 0（允许所有优先级中断） */
+  /*      - SENABLE 清零（初始不使能任何 IRQ） */
+  /* */
+  /*    注意： */
+  /*      - 不要在这里调用 platform_irq_table_init() */
+  /*        否则会把 boot hart 注册好的 handler 清空。 */
+  /*      - 不需要在这里重复注册 UART / RTC 的 handler； */
+  /*        那些是“源级别”的，全局一套就够。 */
+  /* */
   platform_plic_init();
 
-  // 4. 如果将来希望 secondary hart 也直接处理某些外设中断
-  //    （比如本地 virtio queue、per-CPU timer），你可以在这里：
-  //      - 调用 plic_enable_irq(XXX); 打开该 hart 上的使能；
-  //      - 或者新增一个类似 platform_plic_enable_irq_for_this_hart() 的封装。
-  //
-  //    现在你的 UART 中断只需要送到 boot hart 跑 shell 就够了，
-  //    secondary hart 主要先用于实验 SMP/IPI，所以这里可以先什么都不额外开。
+  /* 4. 如果将来希望 secondary hart 也直接处理某些外设中断 */
+  /*    （比如本地 virtio queue、per-CPU timer），你可以在这里： */
+  /*      - 调用 plic_enable_irq(XXX); 打开该 hart 上的使能； */
+  /*      - 或者新增一个类似 platform_plic_enable_irq_for_this_hart() 的封装。 */
+  /* */
+  /*    现在你的 UART 中断只需要送到 boot hart 跑 shell 就够了， */
+  /*    secondary hart 主要先用于实验 SMP/IPI，所以这里可以先什么都不额外开。 */
 }
 
 /* ========== MISC ========== */

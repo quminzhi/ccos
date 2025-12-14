@@ -1,3 +1,5 @@
+/* syscall.c */
+
 #include "syscall.h"
 #include "usyscall.h"
 
@@ -106,9 +108,19 @@ int thread_detach(tid_t tid)
   return (int)a0;
 }
 
+int runqueue_snapshot(struct rq_state *buf, size_t max)
+{
+  register uintptr_t a0 asm("a0") = SYS_RUNQUEUE_SNAPSHOT;
+  register uintptr_t a1 asm("a1") = (uintptr_t)buf;
+  register uintptr_t a2 asm("a2") = (uintptr_t)max;
+
+  __asm__ volatile("ecall" : "+r"(a0), "+r"(a1), "+r"(a2) : : "memory");
+  return (int)a0; /* number of entries filled, or <0 on error */
+}
+
 int clock_gettime(int clock_id, struct timespec *ts)
 {
-  register uintptr_t a0 asm("a0") = SYS_CLOCK_GETTIME;  // syscall number
+  register uintptr_t a0 asm("a0") = SYS_CLOCK_GETTIME;  /* syscall number */
   register uintptr_t a1 asm("a1") = (uintptr_t)clock_id;
   register uintptr_t a2 asm("a2") = (uintptr_t)ts;
 

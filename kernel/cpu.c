@@ -1,12 +1,13 @@
-#include "cpu.h"
 #include <stdint.h>
-#include "log.h"
+
 #include "arch.h"
-#include "thread.h"
-#include "riscv_csr.h"
+#include "cpu.h"
+#include "log.h"
 #include "platform.h"
-#include "sbi.h"
+#include "riscv_csr.h"
 #include "sched.h"
+#include "sbi.h"
+#include "thread.h"
 
 enum {
   HART_BITS_PER_WORD = (int)(sizeof(unsigned long) * 8u),
@@ -20,14 +21,15 @@ uint8_t g_kstack[MAX_HARTS][KSTACK_SIZE];
 volatile uint32_t g_boot_hartid = NO_BOOT_HART;
 volatile int smp_boot_done      = 0;
 
-/* 供 IPI 使用的全局 hart mask 缓冲区（放在 BSS，M 态可直接访问）。 */
-static unsigned long g_smp_ipi_mask[HART_MASK_WORDS] __attribute__((aligned(sizeof(unsigned long))));
-
-static inline void smp_set_online(uint32_t hartid) {
+static inline void
+smp_set_online(uint32_t hartid)
+{
   g_cpus[hartid].online = 1;
 }
 
-void cpu_init_this_hart(uintptr_t hartid) {
+void
+cpu_init_this_hart(uintptr_t hartid)
+{
   if (hartid >= MAX_HARTS) {
     PANICF("hartid %lu >= MAX_HARTS", (unsigned long)hartid);
   }
@@ -58,14 +60,16 @@ void cpu_init_this_hart(uintptr_t hartid) {
   sched_init_this_hart((uint32_t)hartid);
 }
 
-void cpu_enter_idle(uint32_t hartid) {
+void
+cpu_enter_idle(uint32_t hartid)
+{
   ASSERT(hartid < MAX_HARTS);
 
   cpu_t *c = cpu_this();
   ASSERT(c && c->hartid == hartid);
 
-  // 建议：确保本 hart 还没开中断再进（至少 SIE=0）
-  // uint32_t flags = irq_disable();  // 如果你有的话
+  /* 建议：确保本 hart 还没开中断再进（至少 SIE=0） */
+  /* uint32_t flags = irq_disable();  如果有全局 irq_disable 可以使用 */
 
   /* 约定：tid == hartid 是该 CPU 的 idle */
   c->idle_tid    = (tid_t)hartid;
@@ -100,13 +104,17 @@ void cpu_enter_idle(uint32_t hartid) {
   __builtin_unreachable();
 }
 
-void set_smp_boot_done() {
-  smp_mb();  // 确保上面所有写操作先对其它 hart 可见
+void
+set_smp_boot_done(void)
+{
+  smp_mb();  /* 确保上面所有写操作先对其它 hart 可见 */
   smp_boot_done = 1;
-  smp_mb();  // 防止之后的代码被重排到前面
+  smp_mb();  /* 防止之后的代码被重排到前面 */
 }
 
-void wait_for_smp_boot_done() {
+void
+wait_for_smp_boot_done(void)
+{
   while (!smp_boot_done) {
     smp_mb();
     __asm__ volatile("wfi");
@@ -114,7 +122,9 @@ void wait_for_smp_boot_done() {
   smp_mb();
 }
 
-void smp_kick_all_others(void) {
+void
+smp_kick_all_others(void)
+{
   if (!smp_boot_done) {
     return;
   }
@@ -134,7 +144,9 @@ void smp_kick_all_others(void) {
   }
 }
 
-void smp_kick_hart(uint32_t hartid) {
+void
+smp_kick_hart(uint32_t hartid)
+{
   if (!smp_boot_done) return;
   if (hartid >= (uint32_t)MAX_HARTS) return;
   if (!g_cpus[hartid].online) return;

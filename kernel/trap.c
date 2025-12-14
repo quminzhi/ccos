@@ -1,19 +1,19 @@
-// kernel/trap.c
+/* kernel/trap.c */
 
 #include <stdint.h>
 #include <time.h>
-#include "riscv_csr.h"
-#include "platform.h"
-#include "trap.h"
-#include "thread.h"
-#include "usyscall.h"
+
+#include "cpu.h"
+#include "lock.h"
 #include "log.h"
 #include "panic.h"
+#include "platform.h"
+#include "riscv_csr.h"
+#include "sched.h"
 #include "sysfile.h"
-#include "lock.h"
-#include "cpu.h"
-#include "sched.h"
-#include "sched.h"
+#include "thread.h"
+#include "trap.h"
+#include "usyscall.h"
 
 #ifndef NDEBUG
 extern void print_thread_prefix(void);
@@ -23,21 +23,25 @@ extern void trap_entry(void);
 static void dump_trap(struct trapframe *tf);
 static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid);
 
-void trap_init(void) {
+void
+trap_init(void)
+{
   reg_t addr = (reg_t)trap_entry;
   reg_t val  = addr & ~((reg_t)STVEC_MODE_MASK);
   val |= STVEC_MODE_DIRECT;
   csr_write(stvec, val);
 }
 
-static void breakpoint_handler(struct trapframe *tf) {
+static void
+breakpoint_handler(struct trapframe *tf)
+{
   const reg_t scause    = tf->scause;
   const uintptr_t sepc  = tf->sepc;
   const uintptr_t stval = tf->stval;
   const reg_t sstatus   = tf->sstatus;
 
   const int from_kernel =
-      (sstatus & SSTATUS_SPP) != 0;  // 1 = S-mode, 0 = U-mode
+      (sstatus & SSTATUS_SPP) != 0;  /* 1 = S-mode, 0 = U-mode */
 
 #ifndef NDEBUG
   /* -------- Debug 版本：打印信息，尽量帮你定位 -------- */
@@ -55,7 +59,7 @@ static void breakpoint_handler(struct trapframe *tf) {
      * 策略：跳过 ebreak，然后把当前线程干掉，避免用户态死循环。
      */
     tf->sepc = sepc + 4;
-    thread_sys_exit(tf, -1);  // 不一定会返回（内部可能 schedule）
+    thread_sys_exit(tf, -1);  /* 不一定会返回（内部可能 schedule） */
     return;
   }
 
@@ -70,12 +74,14 @@ static void breakpoint_handler(struct trapframe *tf) {
   /* -------- Release 版本：出现在这里就是严重 bug -------- */
   dump_trap(tf);
   panic("EXC_BREAKPOINT in release build");
-  // NOT REACHED
+  /* NOT REACHED */
 
 #endif /* NDEBUG */
 }
 
-static void syscall_handler(struct trapframe *tf) {
+static void
+syscall_handler(struct trapframe *tf)
+{
   const uintptr_t sys_id = tf->a0;
 
   uint64_t nwrite, nread;
@@ -85,15 +91,15 @@ static void syscall_handler(struct trapframe *tf) {
   switch (sys_id) {
     case SYS_SLEEP:
       thread_sys_sleep(tf, tf->a1);
-      // 里面可能 schedule()
+      /* 里面可能 schedule() */
       break;
     case SYS_THREAD_EXIT:
       thread_sys_exit(tf, (int)tf->a1);
-      // 通常不会“回到这个线程”的 trap_return
+      /* 通常不会“回到这个线程”的 trap_return */
       break;
     case SYS_THREAD_JOIN:
       thread_sys_join(tf, (tid_t)tf->a1, tf->a2);
-      // 阻塞情况下，thread_sys_join 内部会调用 schedule()
+      /* 阻塞情况下，thread_sys_join 内部会调用 schedule() */
       break;
     case SYS_THREAD_CREATE:
       thread_sys_create(tf, (thread_entry_t)tf->a1, (void *)tf->a2,
@@ -145,6 +151,10 @@ static void syscall_handler(struct trapframe *tf) {
     case SYS_THREAD_DETACH:
       thread_sys_detach(tf, (tid_t)tf->a1);
       break;
+    case SYS_RUNQUEUE_SNAPSHOT:
+      tf->a0 = sys_runqueue_snapshot((struct rq_state *)tf->a1,
+                                     (size_t)tf->a2);
+      break;
     default:
       dump_trap(tf);
       panic("unknown syscall");
@@ -152,7 +162,9 @@ static void syscall_handler(struct trapframe *tf) {
   }
 }
 
-struct trapframe *trap_entry_c(struct trapframe *tf) {
+struct trapframe *
+trap_entry_c(struct trapframe *tf)
+{
   reg_t irq_state = kernel_lock();
   struct trapframe *ret;
 
@@ -161,13 +173,14 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
   const reg_t code        = scause_code(scause);
 
 #ifndef NDEBUG
-  // const unsigned long old_sepc   = tf->sepc;
-  // const unsigned long old_s0     = tf->s0;
-  // const unsigned long old_scause = tf->scause;
-
-  // pr_debug("trap_entry_c: ENTER sepc=0x%lx s0=0x%lx scause=0x%lx", old_sepc,
-  //          old_s0, old_scause);
-  // print_thread_prefix();
+  /* Debug helpers:
+   * const unsigned long old_sepc   = tf->sepc;
+   * const unsigned long old_s0     = tf->s0;
+   * const unsigned long old_scause = tf->scause;
+   * pr_debug("trap_entry_c: ENTER sepc=0x%lx s0=0x%lx scause=0x%lx",
+   *          old_sepc, old_s0, old_scause);
+   * print_thread_prefix();
+   */
 #endif
 
   if (scause_is_interrupt(scause)) {
@@ -178,13 +191,13 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
         goto handled;
       case IRQ_TIMER_S:
         /* S-mode timer interrupt */
-        sched_on_timer_irq(tf);  // 内部可能调用 schedule()
+        sched_on_timer_irq(tf);  /* 内部可能调用 schedule() */
         goto handled;
       case IRQ_EXT_S:
         platform_handle_s_external(tf);
         goto handled;
       default:
-        break;  // 落到下面的“未处理 trap”
+        break;  /* 落到下面的“未处理 trap” */
     }
   } else {
     switch (code) {
@@ -197,7 +210,7 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
       case EXC_ILLEGAL_INSTR:
         platform_puts("Illegal instruction\n");
         if ((sstatus & SSTATUS_SPP) == 0) {
-          // 对用户态非法指令，终止当前线程（类似 SIGILL）
+          /* 对用户态非法指令，终止当前线程（类似 SIGILL） */
           thread_sys_exit(tf, -1);
           goto handled;
         }
@@ -214,9 +227,9 @@ struct trapframe *trap_entry_c(struct trapframe *tf) {
 handled:
 
 #ifndef NDEBUG
-  // pr_debug("trap_entry_c: LEAVE sepc=0x%lx s0=0x%lx", (unsigned
-  // long)tf->sepc,
-  //          (unsigned long)tf->s0);
+  /* pr_debug("trap_entry_c: LEAVE sepc=0x%lx s0=0x%lx",
+   *          (unsigned long)tf->sepc, (unsigned long)tf->s0);
+   */
 #endif
 
   ret = cpu_this()->cur_tf;
@@ -226,7 +239,9 @@ handled:
 
 /* ---------- 调试用：打印完整 trap 信息 ---------- */
 
-static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid) {
+static void
+dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid)
+{
   (void)tid; /* 如果暂时不用 tid，避免编译告警 */
 
   /* RISC-V GCC 在 -fno-omit-frame-pointer 下：
@@ -308,7 +323,9 @@ static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid) {
   }
 }
 
-static void dump_trap(struct trapframe *tf) {
+static void
+dump_trap(struct trapframe *tf)
+{
   reg_t scause      = tf->scause;
   uintptr_t stval   = tf->stval;
   uintptr_t sepc    = tf->sepc;

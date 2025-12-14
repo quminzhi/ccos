@@ -13,4 +13,4 @@ int console_read_nonblock(char *buf, size_t len);
 /* UART IRQ 回调入口：在中断上下文里被调用 */
 void console_on_char_from_irq(uint8_t ch);
 
-#endif // CONSOLE_H
+#endif /* CONSOLE_H */

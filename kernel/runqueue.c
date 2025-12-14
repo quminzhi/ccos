@@ -1,7 +1,9 @@
+/* runqueue.c */
+
+#include "log.h"
 #include "runqueue.h"
 #include "thread.h"
 #include "types.h"
-#include "log.h"
 
 typedef struct {
   tid_t head;
@@ -24,14 +26,18 @@ void rq_init_all(void) {
   }
 }
 
-static inline runqueue_t* rq(uint32_t hartid) {
+static inline runqueue_t *
+rq(uint32_t hartid)
+{
   return &g_runqueues[hartid];
 }
 
-void rq_push_tail(uint32_t hartid, tid_t tid) {
+void
+rq_push_tail(uint32_t hartid, tid_t tid)
+{
   if (hartid >= (uint32_t)MAX_HARTS) return;
   if (tid < 0 || tid >= THREAD_MAX) return;
-  if (tid < (tid_t)MAX_HARTS) return;  // 不把 idle 放进 rq
+  if (tid < (tid_t)MAX_HARTS) return;  /* 不把 idle 放进 rq */
 
   runqueue_t* r = rq(hartid);
   Thread* t     = &g_threads[tid];
@@ -51,7 +57,9 @@ void rq_push_tail(uint32_t hartid, tid_t tid) {
   r->len++;
 }
 
-tid_t rq_pop_head(uint32_t hartid) {
+tid_t
+rq_pop_head(uint32_t hartid)
+{
   if (hartid >= (uint32_t)MAX_HARTS) return -1;
   runqueue_t* r = rq(hartid);
   tid_t tid     = r->head;
@@ -70,12 +78,16 @@ tid_t rq_pop_head(uint32_t hartid) {
   return tid;
 }
 
-uint32_t rq_len(uint32_t hartid) {
+uint32_t
+rq_len(uint32_t hartid)
+{
   if (hartid >= (uint32_t)MAX_HARTS) return 0;
   return rq(hartid)->len;
 }
 
-int rq_remove(uint32_t hartid, tid_t tid) {
+int
+rq_remove(uint32_t hartid, tid_t tid)
+{
   if (hartid >= (uint32_t)MAX_HARTS) return -1;
   if (tid < 0 || tid >= THREAD_MAX) return -1;
 
@@ -108,7 +120,9 @@ int rq_remove(uint32_t hartid, tid_t tid) {
   return -1;
 }
 
-int rq_remove_any(tid_t tid) {
+int
+rq_remove_any(tid_t tid)
+{
   if (tid < 0 || tid >= THREAD_MAX) return -1;
   for (uint32_t h = 0; h < (uint32_t)MAX_HARTS; ++h) {
     if (rq_remove(h, tid) == 0) {
@@ -116,4 +130,24 @@ int rq_remove_any(tid_t tid) {
     }
   }
   return -1;
+}
+
+int
+rq_snapshot(uint32_t hartid, tid_t *dst, size_t max)
+{
+  if (hartid >= (uint32_t)MAX_HARTS) return -1;
+  if (!dst || max == 0) return -1;
+
+  runqueue_t* r = rq(hartid);
+  tid_t cur     = r->head;
+  size_t n      = 0;
+
+  while (cur >= 0 && n < max) {
+    dst[n++] = cur;
+    cur      = g_threads[cur].rq_next;
+  }
+  if (n < max) {
+    dst[n] = -1;  /* sentinel for user-friendly printing */
+  }
+  return (int)n;
 }

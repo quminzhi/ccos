@@ -1,15 +1,16 @@
-// main.c
+/* main.c */
 #include <stdint.h>
-#include "console.h"
-#include "platform.h"
-#include "log.h"
-#include "trap.h"
+
 #include "arch.h"
+#include "console.h"
+#include "cpu.h"
+#include "kernel.h"
+#include "log.h"
+#include "platform.h"
+#include "sbi.h"
 #include "thread.h"
 #include "time.h"
-#include "kernel.h"
-#include "cpu.h"
-#include "sbi.h"
+#include "trap.h"
 
 extern void secondary_entry(void);
 
@@ -67,7 +68,7 @@ void primary_main(long hartid, long dtb_pa) {
   platform_puts("Booting...\n");
 
   trap_init();
-  console_init();  // console layer on uart
+  console_init();  /* console layer on uart */
   log_init_baremetal();
 
   time_init();
@@ -81,10 +82,6 @@ void primary_main(long hartid, long dtb_pa) {
   pr_info("Boot Hart: system init done.");
 
   cpu_enter_idle(hartid);
-
-  for (;;) {
-    __asm__ volatile("wfi");
-  }
 }
 
 void secondary_main(long hartid, long dtb_pa) {
@@ -96,12 +93,4 @@ void secondary_main(long hartid, long dtb_pa) {
 
   pr_info("hart %ld online (secondary)", cpu_current_hartid());
   cpu_enter_idle((uint32_t)hartid);
-
-  // TODO: 用 IPI（软件中断）做 resched（更省电、更像现代 OS）
-  // - secondary 在 idle 里 wfi
-  // - 当 boot hart/任意 hart 把某线程变成 RUNNABLE 时，发一个 IPI 给某个空闲
-  // hart，让它从 wfi 醒来进入 schedule
-  for (;;) {
-    __asm__ volatile("wfi");
-  }
 }

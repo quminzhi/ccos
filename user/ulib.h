@@ -33,18 +33,18 @@ int u_atoi(const char *s);
 
 /* ===== Tiny stdio based on write() ===== */
 
-int u_putchar(int c);                // Emit a single character to stdout.
-int u_puts(const char *s);           // Print string + '\n'.
-int u_printf(const char *fmt, ...);  // Minimal printf: %s %d %u %x %p %c %%
+int u_putchar(int c);                /* Emit a single character to stdout. */
+int u_puts(const char *s);           /* Print string + '\n'. */
+int u_printf(const char *fmt, ...);  /* Minimal printf: %s %d %u %x %p %c %% */
 int u_snprintf(char *buf, size_t sz, const char *fmt, ...);
 
-// - u_gets targets interactive terminal input (shell/console only).
-// - u_read_line is reserved for future network/pipe/file line reading.
+/* - u_gets targets interactive terminal input (shell/console only). */
+/* - u_read_line is reserved for future network/pipe/file line reading. */
 int u_read_line(int fd, char *buf, int buf_size);
-int u_getchar(void);                         // Read one char from stdin.
-int u_gets(char *buf, int buf_size);         // Read a line from stdin, strip CRLF.
-int u_readn(int fd, void *buf, int nbytes);  // Read exactly nbytes if possible.
+int u_getchar(void);                         /* Read one char from stdin. */
+int u_gets(char *buf, int buf_size);         /* Read a line from stdin, strip CRLF. */
+int u_readn(int fd, void *buf, int nbytes);  /* Read exactly nbytes if possible. */
 int u_read_until(int fd, char *buf, int buf_size,
-                 char delim);  // Read until delim or buffer full.
+                 char delim);  /* Read until delim or buffer full. */
 
-#endif  // ULIB_H
+#endif  /* ULIB_H */

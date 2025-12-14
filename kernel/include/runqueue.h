@@ -1,6 +1,8 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
+
 #include "types.h"
 
 /* 简单 per-hart FIFO runqueue（单链表）。*/
@@ -20,3 +22,6 @@ int rq_remove(uint32_t hartid, tid_t tid);
  * Returns hartid (>=0) on success, -1 if not found.
  */
 int rq_remove_any(tid_t tid);
+
+/* Copy runqueue order into dst (up to max entries); returns length or -1. */
+int rq_snapshot(uint32_t hartid, tid_t *dst, size_t max);

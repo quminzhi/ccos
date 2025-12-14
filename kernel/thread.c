@@ -2,7 +2,6 @@
 #include <stddef.h>
 
 #include "thread.h"
-#include "uthread.h"
 #include "trap.h"
 #include "log.h"
 #include "platform.h"
@@ -39,10 +38,12 @@ static void idle_main(void *arg) __attribute__((noreturn));
 
 static uint64_t g_ticks = 0;
 
-/* 让 tid 变成 RUNNABLE 并放入一个 hart 的 runqueue，必要时 kick 目标 hart。 */
+/* 让 tid 变成 RUNNABLE 并放入一个 hart 的 runqueue，必要时 kick 目标 hart。
+ * 约束：idle 不入 rq；重复入队直接忽略。
+ */
 void thread_make_runnable(tid_t tid, uint32_t preferred_hart) {
   if (tid < 0 || tid >= THREAD_MAX) return;
-  if (tid < (tid_t)MAX_HARTS) return;  // idle 不入 rq
+  if (tid < (tid_t)MAX_HARTS) return;  /* idle 不入 rq */
 
   Thread *t = &g_threads[tid];
   if (t->on_rq || t->state == THREAD_RUNNING) return;
@@ -66,10 +67,10 @@ void thread_make_runnable(tid_t tid, uint32_t preferred_hart) {
 void thread_mark_running(Thread *t, uint32_t hartid) {
   t->running_hart = (int32_t)hartid;
 
-  // Count how many times the thread reaches RUNNING.
+  /* Count how many times the thread reaches RUNNING. */
   t->runs++;
 
-  // Count migrations only after it has run at least once and hart changes.
+  /* Count migrations only after it has run at least once and hart changes. */
   if (t->last_hart >= 0 && t->last_hart != (int32_t)hartid) {
     t->migrations++;
   }
@@ -84,10 +85,6 @@ void thread_mark_not_running(Thread *t) {
 
 static inline tid_t current_tid_get(void) {
   return (tid_t)cpu_this()->current_tid;
-}
-
-static inline void current_tid_set(tid_t tid) {
-  cpu_this()->current_tid = (int)tid;
 }
 
 static inline void tf_clear(struct trapframe *tf) {
@@ -124,9 +121,9 @@ static void init_thread_context_s(Thread *t, thread_entry_t entry, void *arg) {
   tf->a0   = (uintptr_t)arg;
 
   reg_t s  = csr_read(sstatus);
-  s &= ~(SSTATUS_SPP | SSTATUS_SIE);  // Clear mode/interrupt bits first.
-  s |= SSTATUS_SPP;                   // SPP=1 so sret returns to S-mode.
-  s |= SSTATUS_SPIE;                  // Re-enable S-mode interrupts after sret.
+  s &= ~(SSTATUS_SPP | SSTATUS_SIE);  /* Clear mode/interrupt bits first. */
+  s |= SSTATUS_SPP;                   /* SPP=1 so sret returns to S-mode. */
+  s |= SSTATUS_SPIE;                  /* Re-enable S-mode interrupts after sret. */
   tf->sstatus = s;
 }
 
@@ -138,12 +135,12 @@ static void init_thread_context_u(Thread *t, thread_entry_t entry, void *arg) {
   sp &= ~(uintptr_t)0xFUL;
 
   tf->sp   = sp;
-  tf->sepc = (uintptr_t)entry;  // User-space PC.
-  tf->a0   = (uintptr_t)arg;    // First argument.
+  tf->sepc = (uintptr_t)entry;  /* User-space PC. */
+  tf->a0   = (uintptr_t)arg;    /* First argument. */
 
   reg_t s  = csr_read(sstatus);
   s &= ~(SSTATUS_SPP | SSTATUS_SIE);
-  // SPP=0 so sret returns to U-mode; set SPIE so U-mode can be interrupted.
+  /* SPP=0 so sret returns to U-mode; set SPIE so U-mode can be interrupted. */
   s |= SSTATUS_SPIE;
   tf->sstatus = s;
 }
@@ -186,21 +183,20 @@ static void recycle_thread(tid_t tid) {
   t->runs         = 0;
   t->rq_next      = -1;
   t->on_rq        = 0;
-  t->bound_hart   = -1;
   /* The stack array g_thread_stacks[tid] stays allocated for reuse. */
 }
 
 static char s_idle_names[MAX_HARTS][16];
 
 static const char *idle_name_for_hart(uint32_t hartid) {
-  // Generate "idleX" without snprintf to avoid freestanding issues.
+  /* Generate "idleX" without snprintf to avoid freestanding issues. */
   char *p    = s_idle_names[hartid];
   p[0]       = 'i';
   p[1]       = 'd';
   p[2]       = 'l';
   p[3]       = 'e';
 
-  // Simple decimal conversion.
+  /* Simple decimal conversion. */
   uint32_t x = hartid;
   char tmp[10];
   int n = 0;
@@ -258,13 +254,12 @@ void threads_init(thread_entry_t user_main) {
     g_threads[i].runs             = 0;
     g_threads[i].rq_next          = -1;
     g_threads[i].on_rq            = 0;
-    g_threads[i].bound_hart       = -1;
     tf_clear(&g_threads[i].tf);
   }
 
   rq_init_all();
 
-  // prepare idle thread (idle tid = hartid)
+  /* prepare idle thread (idle tid = hartid) */
   for (uint32_t hid = 0; hid < (uint32_t)MAX_HARTS; ++hid) {
     Thread *idle        = &g_threads[hid];
     idle->state         = THREAD_RUNNABLE;
@@ -276,7 +271,7 @@ void threads_init(thread_entry_t user_main) {
     init_thread_context_s(idle, idle_main, (void *)(uintptr_t)hid);
   }
 
-  // create thread for user main
+  /* create thread for user main */
   tid_t user_main_tid = thread_create_user_main(user_main, NULL);
   ASSERT(user_main_tid == FIRST_TID);
 }
@@ -365,7 +360,7 @@ struct trapframe *schedule(struct trapframe *tf) {
   }
   thread_mark_not_running(cur);
   if (cur_is_idle) {
-    cur->state = THREAD_RUNNABLE;  // idle 不在 rq，但状态反映“可随时运行”
+    cur->state = THREAD_RUNNABLE;  /* idle 不在 rq，但状态反映“可随时运行” */
   }
 
   /* 如果当前线程已退出（例如被 kill），并且已经有 joiner，切走时才安全回收。 */
@@ -456,7 +451,7 @@ void thread_sys_yield(struct trapframe *tf) {
 void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
                        const char *name) {
   tid_t tid = thread_create_user(entry, arg, name);
-  tf->a0    = (uintptr_t)tid;  // Return tid to user mode.
+  tf->a0    = (uintptr_t)tid;  /* Return tid to user mode. */
 }
 
 void thread_sys_exit(struct trapframe *tf, int exit_code) {
@@ -573,7 +568,7 @@ void thread_sys_join(struct trapframe *tf, tid_t target_tid,
 
 int thread_sys_list(struct u_thread_info *ubuf, int max) {
   if (!ubuf || max <= 0) {
-    return -1;  // EINVAL
+    return -1;  /* EINVAL */
   }
   int count = 0;
   for (int i = 0; i < THREAD_MAX && count < max; ++i) {
@@ -608,34 +603,34 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
   tid_t cur_tid = current_tid_get();
   /* Basic checks. */
   if (target_tid < 0 || target_tid >= THREAD_MAX) {
-    tf->a0 = -1;  // EINVAL
+    tf->a0 = -1;  /* EINVAL */
     return;
   }
 
   if (target_tid == 0) {
-    tf->a0 = -2;  // Killing idle threads is not allowed.
+    tf->a0 = -2;  /* Killing idle threads is not allowed. */
     return;
   }
 
   if (target_tid == cur_tid) {
-    tf->a0 = -4;  // Do not allow kill-based suicide; use thread_exit instead.
+    tf->a0 = -4;  /* Do not allow kill-based suicide; use thread_exit instead. */
     return;
   }
 
   Thread *t = &g_threads[target_tid];
 
   if (t->can_be_killed == 0) {
-    tf->a0 = -3;  // Thread may not be killed.
+    tf->a0 = -3;  /* Thread may not be killed. */
     return;
   }
 
   if (t->state == THREAD_UNUSED) {
-    tf->a0 = -3;  // ESRCH: thread not found.
+    tf->a0 = -3;  /* ESRCH: thread not found. */
     return;
   }
 
   if (t->state == THREAD_ZOMBIE) {
-    tf->a0 = 0;  // Already dead; treat as success.
+    tf->a0 = 0;  /* Already dead; treat as success. */
     return;
   }
 
@@ -643,7 +638,7 @@ void thread_sys_kill(struct trapframe *tf, tid_t target_tid) {
   tid_t joiner = t->join_waiter;
 
   /* Force ZOMBIE state (SIGKILL semantics). */
-  t->exit_code = THREAD_EXITCODE_SIGKILL;  // Usually -9.
+  t->exit_code = THREAD_EXITCODE_SIGKILL;  /* Usually -9. */
   t->state     = THREAD_ZOMBIE;
   t->wakeup_tick = 0;
 
@@ -738,6 +733,32 @@ void thread_sys_detach(struct trapframe *tf, tid_t target_tid) {
   tf->a0 = 0;
 }
 
+/* Runqueue snapshot: write up to n online harts into ubuf; returns count. */
+long sys_runqueue_snapshot(struct rq_state *ubuf, size_t n) {
+  if (!ubuf || n == 0) {
+    return -1;
+  }
+
+  size_t out = 0;
+  for (uint32_t h = 0; h < (uint32_t)MAX_HARTS && out < n; ++h) {
+    if (!g_cpus[h].online) continue;
+
+    struct rq_state tmp;
+    tmp.hart = h;
+    tmp.len  = 0;
+    for (size_t i = 0; i < RQ_MAX_TIDS; ++i) {
+      tmp.tids[i] = -1;
+    }
+
+    int len = rq_snapshot(h, tmp.tids, RQ_MAX_TIDS);
+    if (len < 0) len = 0;
+    tmp.len = (uint32_t)len;
+
+    ubuf[out++] = tmp;
+  }
+  return (long)out;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Introspection                                                              */
 /* -------------------------------------------------------------------------- */
@@ -793,7 +814,7 @@ void thread_read_from_stdin(console_reader_t read) {
 
   int n          = read(user_buf, max_len);
   if (n <= 0) {
-    // If nothing was read (rare race), wait for the next interrupt.
+    /* If nothing was read (rare race), wait for the next interrupt. */
     return;
   }
 

@@ -1,13 +1,13 @@
-// kernel/include/spinlock.h
+/* kernel/include/spinlock.h */
 #pragma once
 
-#ifndef __ASSEMBLER__  // ← 只有 C/C++ 编译时才看到下面的内容
+#ifndef __ASSEMBLER__  /* ← 只有 C/C++ 编译时才看到下面的内容 */
 
 #include <stdint.h>
 #include "riscv_csr.h"
 
 typedef struct {
-  volatile uint32_t locked;  // 0 = unlocked, 1 = locked
+  volatile uint32_t locked;  /* 0 = unlocked, 1 = locked */
 } spinlock_t;
 
 #define SPINLOCK_INIT {.locked = 0}

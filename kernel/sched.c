@@ -1,10 +1,12 @@
-#include "sched.h"
+/* sched.c */
+
 #include "cpu.h"
-#include "thread.h"
 #include "platform.h"
 #include "riscv_csr.h"
-#include "trap.h"
 #include "runqueue.h"
+#include "sched.h"
+#include "thread.h"
+#include "trap.h"
 
 /*
  * Phase1：硬抢占 + 每核本地 tick
@@ -18,14 +20,18 @@ static inline void sched_rearm_timer(void) {
   platform_timer_start_after(DELTA_TICKS);
 }
 
-void sched_init_this_hart(uint32_t hartid) {
+void
+sched_init_this_hart(uint32_t hartid)
+{
   (void)hartid;
-  cpu_t *c       = cpu_this();
+  cpu_t *c        = cpu_this();
   c->need_resched = 0;
   c->slice_left   = SCHED_SLICE_TICKS;
 }
 
-void sched_on_timer_irq(struct trapframe *tf) {
+void
+sched_on_timer_irq(struct trapframe *tf)
+{
   cpu_t *c = cpu_this();
   c->timer_irqs++;
 
@@ -43,21 +49,25 @@ void sched_on_timer_irq(struct trapframe *tf) {
   }
   if (c->slice_left == 0) {
     c->slice_left   = SCHED_SLICE_TICKS;
-    c->need_resched = 0;  // 正在执行 schedule，无需额外 resched 标记
+    c->need_resched = 0;  /* 正在执行 schedule，无需额外 resched 标记 */
     schedule(tf);
   }
 }
 
-void sched_on_ipi_irq(struct trapframe *tf) {
+void
+sched_on_ipi_irq(struct trapframe *tf)
+{
   /* 清除 SSIP，避免下一次进 trap 看到 pending。 */
   csr_clear(sip, SIP_SSIP);
 
-  cpu_t *c = cpu_this();
-  c->need_resched = 0;  // 即将 schedule，不需要累积
+  cpu_t *c        = cpu_this();
+  c->need_resched = 0;  /* 即将 schedule，不需要累积 */
   schedule(tf);
 }
 
-uint32_t sched_pick_target_hart(tid_t tid, uint32_t waker_hart) {
+uint32_t
+sched_pick_target_hart(tid_t tid, uint32_t waker_hart)
+{
   (void)tid;
   uint32_t best_hart   = waker_hart;
   uint32_t best_len    = rq_len(waker_hart);

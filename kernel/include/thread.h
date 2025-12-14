@@ -1,8 +1,9 @@
 #ifndef THREAD_H
 #define THREAD_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+
 #include "trap.h"
 #include "uthread.h"
 
@@ -22,11 +23,17 @@
 
 #define DELTA_TICKS 100000UL /* ~10ms at 10MHz timebase */
 
-// #define DELTA_TICKS 10000000UL /* ~1s */
+/* Alternative: #define DELTA_TICKS 10000000UL   (~1s) */
 
+/* Basic per-thread state. Keep this struct compact and self-explanatory.
+ * Invariants:
+ *   - RUNNABLE 当且仅当 on_rq == 1。
+ *   - RUNNING 表示当前持有 CPU，on_rq == 0。
+ *   - idle 线程永不入 rq。
+ */
 typedef struct Thread {
-  tid_t id;
-  ThreadState state;
+  tid_t        id;
+  ThreadState  state;
   uint64_t wakeup_tick; /* SLEEPING 时的唤醒 tick（绝对时间） */
   const char *name;
   int is_user; /* 0 = S 模式线程; 1 = U 模式线程（可选字段）*/
@@ -34,15 +41,14 @@ typedef struct Thread {
   int detached; /* 1 = detached, auto-recycle on exit/kill */
 
   /* --- SMP debug/metrics --- */
-  int32_t  running_hart;   // -1 not running; >=0 running on that hart
-  int32_t  last_hart;      // -1 never ran;  >=0 last hart it ran on
-  uint32_t migrations;     // number of migrations
-  uint64_t runs;           // number of tim
+  int32_t  running_hart;   /* -1 not running; >=0 running on that hart */
+  int32_t  last_hart;      /* -1 never ran;  >=0 last hart it ran on */
+  uint32_t migrations;     /* number of migrations */
+  uint64_t runs;           /* number of times scheduled RUNNING */
 
   /* runqueue metadata */
-  tid_t    rq_next;    // 单向链表 next
-  uint8_t  on_rq;      // 是否在某个 runqueue 上
-  int32_t  bound_hart; // -1=不绑；>=0=绑定到特定 hart
+  tid_t    rq_next;    /* 单向链表 next */
+  uint8_t  on_rq;      /* 是否在某个 runqueue 上 */
 
   struct trapframe tf; /* 保存的寄存器上下文 */
 
@@ -115,7 +121,9 @@ void thread_sys_create(struct trapframe *tf, thread_entry_t entry, void *arg,
                        const char *name);
 int thread_sys_list(struct u_thread_info *ubuf, int max);
 void thread_sys_kill(struct trapframe *tf, tid_t target_tid);
+/* Mark thread as detached; detached threads auto-recycle, cannot be joined. */
 void thread_sys_detach(struct trapframe *tf, tid_t target_tid);
+long sys_runqueue_snapshot(struct rq_state *ubuf, size_t n);
 
 /* -------------------------------------------------------------------------- */
 /* Introspection / utils                                                      */

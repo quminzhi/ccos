@@ -1,4 +1,4 @@
-// platform/qemu-virt-sbi/uart_16550.c
+/* platform/qemu-virt-sbi/uart_16550.c */
 #include "uart_16550.h"
 #include "platform.h"
 #include <stdint.h>
@@ -7,32 +7,32 @@
 #include "log.h"
 #include "cpu.h"
 
-#define UART_RBR       0u  // Receive Buffer Register (read)
-#define UART_THR       0u  // Transmit Holding Register (write)
-#define UART_IER       1u  // Interrupt Enable Register
-#define UART_IIR       2u  // Interrupt Identification Register (read)
-#define UART_FCR       2u  // FIFO Control Register (write)
-#define UART_LSR       5u  // Line Status Register
-#define UART_MSR       6u  // Modem Status Register
+#define UART_RBR       0u  /* Receive Buffer Register (read) */
+#define UART_THR       0u  /* Transmit Holding Register (write) */
+#define UART_IER       1u  /* Interrupt Enable Register */
+#define UART_IIR       2u  /* Interrupt Identification Register (read) */
+#define UART_FCR       2u  /* FIFO Control Register (write) */
+#define UART_LSR       5u  /* Line Status Register */
+#define UART_MSR       6u  /* Modem Status Register */
 
-// LSR bits
-#define UART_LSR_DR    0x01u  // Data Ready
-#define UART_LSR_THRE  0x20u  // THR Empty
+/* LSR bits */
+#define UART_LSR_DR    0x01u  /* Data Ready */
+#define UART_LSR_THRE  0x20u  /* THR Empty */
 
-// IER bits
-#define UART_IER_ERBFI 0x01u  // Enable RX interrupt (RBR full / timeout)
+/* IER bits */
+#define UART_IER_ERBFI 0x01u  /* Enable RX interrupt (RBR full / timeout) */
 #define UART_IER_ETBEI \
-  0x02u  // Enable THRE interrupt (TX empty)  <-- 如果不用 TX IRQ，建议关掉
+  0x02u  /* Enable THRE interrupt (TX empty)  <-- 如果不用 TX IRQ，建议关掉 */
 
-// IIR bits / codes
-#define UART_IIR_NO_PENDING 0x01u  // bit0=1 => no interrupt pending
-#define UART_IIR_ID_MASK    0x0Fu  // low nibble is interrupt ID
+/* IIR bits / codes */
+#define UART_IIR_NO_PENDING 0x01u  /* bit0=1 => no interrupt pending */
+#define UART_IIR_ID_MASK    0x0Fu  /* low nibble is interrupt ID */
 
-#define UART_IIR_ID_MSR     0x00u  // Modem status
-#define UART_IIR_ID_THRE    0x02u  // THR empty
-#define UART_IIR_ID_RX      0x04u  // Received data available
-#define UART_IIR_ID_LSR     0x06u  // Receiver line status
-#define UART_IIR_ID_RXTO    0x0Cu  // RX timeout
+#define UART_IIR_ID_MSR     0x00u  /* Modem status */
+#define UART_IIR_ID_THRE    0x02u  /* THR empty */
+#define UART_IIR_ID_RX      0x04u  /* Received data available */
+#define UART_IIR_ID_LSR     0x06u  /* Receiver line status */
+#define UART_IIR_ID_RXTO    0x0Cu  /* RX timeout */
 
 extern void console_on_char_from_irq(uint8_t ch);
 
@@ -97,7 +97,7 @@ void uart16550_init(void) {
   uart_base = (volatile uint8_t *)(uintptr_t)base;
   uart_irq  = irq;
 
-  // baud rate setting or others
+  /* baud rate setting or others */
   uart_ier_write(UART_IER_ERBFI);
 }
 
@@ -113,15 +113,15 @@ void uart16550_irq_handler(uint32_t irq, void *arg) {
     uint8_t iir = uart_iir_read();
 
     if (iir & UART_IIR_NO_PENDING) {
-      break;  // 没有更多 UART 内部中断源
+      break;  /* 没有更多 UART 内部中断源 */
     }
 
-    // pr_debug("uart irq: hart%u iir=0x%02x ier=0x%02x lsr=0x%02x",
-    //          cpu_current_hartid(), iir, uart_ier_read(), uart_lsr_read());
+    /* pr_debug("uart irq: hart%u iir=0x%02x ier=0x%02x lsr=0x%02x", */
+    /*          cpu_current_hartid(), iir, uart_ier_read(), uart_lsr_read()); */
 
     switch (iir & UART_IIR_ID_MASK) {
-      case UART_IIR_ID_RX:    // RX data available
-      case UART_IIR_ID_RXTO:  // RX timeout
+      case UART_IIR_ID_RX:    /* RX data available */
+      case UART_IIR_ID_RXTO:  /* RX timeout */
         /*
          * RX 类中断：把 FIFO/接收缓冲读空即可清 pending。
          * 注意：要用 LSR.DR 驱动读取，避免丢字节。

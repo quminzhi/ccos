@@ -10,4 +10,4 @@ void arch_enable_software_interrupts(void);
 struct trapframe;
 void arch_first_switch(struct trapframe *tf);
 
-#endif // ARCH_H
+#endif /* ARCH_H */

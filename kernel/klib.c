@@ -1,3 +1,3 @@
-// klib.c - small C runtime helpers for bare-metal
+/* klib.c - small C runtime helpers for bare-metal */
 
 #include "klib.h"

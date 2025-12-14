@@ -1,13 +1,17 @@
-#include "sysfile.h"
+/* sysfile.c */
+
 #include <console.h>
+
+#include "platform.h"
+#include "sysfile.h"
 #include "thread.h"
 #include "time.h"
-#include "platform.h"
 #include "utime.h"
 
 extern tid_t g_stdin_waiter;
 
-uint64_t sys_write(int fd, const char* buf, uint64_t len)
+uint64_t
+sys_write(int fd, const char* buf, uint64_t len)
 {
   if (len == 0) return 0;
 
@@ -22,11 +26,12 @@ uint64_t sys_write(int fd, const char* buf, uint64_t len)
   }
 }
 
-uint64_t sys_read(int fd, char* buf, uint64_t len, struct trapframe* tf,
-                  int* is_non_block_read)
+uint64_t
+sys_read(int fd, char* buf, uint64_t len, struct trapframe* tf,
+         int* is_non_block_read)
 {
   if (fd != FD_STDIN) {
-    // support stdin only
+    /* support stdin only */
     *is_non_block_read = 1;
     return -1;
   }
@@ -38,7 +43,7 @@ uint64_t sys_read(int fd, char* buf, uint64_t len, struct trapframe* tf,
     return (long)n;
   }
 
-  // wait for stdin and block and waked by irq from uart (interrupt context)
+  /* wait for stdin and block and waked by irq from uart (interrupt context) */
   thread_wait_for_stdin(buf, len, tf);
 
   /* 对当前线程来说，上面的 thread_block 不会再回来。
@@ -48,8 +53,8 @@ uint64_t sys_read(int fd, char* buf, uint64_t len, struct trapframe* tf,
   return 0;
 }
 
-static int copy_to_user_timespec(struct timespec* u_ts,
-                                 const struct k_timespec* k_ts)
+static int
+copy_to_user_timespec(struct timespec* u_ts, const struct k_timespec* k_ts)
 {
   if (!u_ts) return -1;
   u_ts->tv_sec  = k_ts->tv_sec;
@@ -57,7 +62,8 @@ static int copy_to_user_timespec(struct timespec* u_ts,
   return 0;
 }
 
-long sys_clock_gettime(int clock_id, struct timespec* u_ts)
+long
+sys_clock_gettime(int clock_id, struct timespec* u_ts)
 {
   struct k_timespec kt;
 
@@ -77,9 +83,10 @@ long sys_clock_gettime(int clock_id, struct timespec* u_ts)
   return 0;
 }
 
-long sys_irq_get_stats(struct irqstat_user* ubuf, size_t n)
+long
+sys_irq_get_stats(struct irqstat_user* ubuf, size_t n)
 {
-  if (!ubuf) return -1;  // 简单错误码
+  if (!ubuf) return -1;  /* 简单错误码 */
 
   if (n > IRQSTAT_MAX_IRQ) {
     n = IRQSTAT_MAX_IRQ;
@@ -96,7 +103,7 @@ long sys_irq_get_stats(struct irqstat_user* ubuf, size_t n)
     tmp.last_tick    = kstats[i].last_tick;
     tmp.max_delta    = kstats[i].max_delta;
 
-    // 拷贝名字，截断
+    /* 拷贝名字，截断 */
     size_t j         = 0;
     const char* name = kstats[i].name;
     if (name) {
@@ -106,8 +113,8 @@ long sys_irq_get_stats(struct irqstat_user* ubuf, size_t n)
     }
     tmp.name[j] = '\0';
 
-    // 简化版：直接把用户指针当内核指针用
-    // 如果以后有虚拟内存隔离，再换成 copy_to_user
+    /* 简化版：直接把用户指针当内核指针用 */
+    /* 如果以后有虚拟内存隔离，再换成 copy_to_user */
     ubuf[i]     = tmp;
   }
 

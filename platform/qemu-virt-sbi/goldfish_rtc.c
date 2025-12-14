@@ -1,10 +1,10 @@
-// goldfish_rtc.c
+/* goldfish_rtc.c */
 #include "goldfish_rtc.h"
 #include <stdint.h>
 #include "platform.h"
 #include "fdt_helper.h"
 
-// 寄存器偏移
+/* 寄存器偏移 */
 #define RTC_TIME_LOW        0x00
 #define RTC_TIME_HIGH       0x04
 #define RTC_ALARM_LOW       0x08
@@ -14,12 +14,12 @@
 #define RTC_ALARM_STATUS    0x18
 #define RTC_CLEAR_INTERRUPT 0x1c
 
-// 硬编码版本：
-// // QEMU virt.dts 里的地址：reg = <0x0 0x00101000 0x0 0x00001000>
-// #define QEMU_VIRT_RTC_BASE  0x00101000UL
-// // PLIC 里的 IRQ 号：virt.dts 里 rtc@101000 的 interrupts = <11>;
-// #define QEMU_VIRT_RTC_IRQ   11
-// static volatile uint32_t *rtc_base = (volatile uint32_t *)QEMU_VIRT_RTC_BASE;
+/* 硬编码版本： */
+/* QEMU virt.dts 地址：reg = <0x0 0x00101000 0x0 0x00001000> */
+/* #define QEMU_VIRT_RTC_BASE  0x00101000UL */
+/* PLIC IRQ：virt.dts 中 rtc@101000 的 interrupts = <11>; */
+/* #define QEMU_VIRT_RTC_IRQ   11 */
+/* static volatile uint32_t *rtc_base = (volatile uint32_t *)QEMU_VIRT_RTC_BASE; */
 
 static volatile uint32_t *rtc_base;
 static uint32_t rtc_irq;
@@ -51,20 +51,20 @@ void goldfish_rtc_init(void)
     return;
   }
 
-  rtc_base = (volatile uint32_t *)(uintptr_t)base; // 暂时物理=虚拟
+  rtc_base = (volatile uint32_t *)(uintptr_t)base; /* 暂时物理=虚拟 */
   rtc_irq  = irq;
 
-  // 清一下可能遗留的状态
+  /* 清一下可能遗留的状态 */
   rtc_w32(RTC_CLEAR_ALARM, 1);
   rtc_w32(RTC_CLEAR_INTERRUPT, 1);
 
-  // 先默认不开中断，等真正设置闹钟的时候再 enable
+  /* 先默认不开中断，等真正设置闹钟的时候再 enable */
   rtc_w32(RTC_IRQ_ENABLED, 0);
 }
 
 uint64_t goldfish_rtc_read_ns(void)
 {
-  // 文档要求：先读 TIME_LOW，再读 TIME_HIGH，这样 QEMU 会给你一个原子 snapshot
+  /* 文档要求：先读 TIME_LOW，再读 TIME_HIGH，这样 QEMU 会给你一个原子 snapshot */
   uint32_t lo = rtc_r32(RTC_TIME_LOW);
   uint32_t hi = rtc_r32(RTC_TIME_HIGH);
   return ((uint64_t)hi << 32) | lo;
@@ -87,9 +87,9 @@ void goldfish_rtc_set_alarm_after(uint64_t delay_ns)
    * 才是完整的 64bit 值。
    */
   rtc_w32(RTC_ALARM_HIGH, hi);
-  rtc_w32(RTC_ALARM_LOW, lo);  // 这一步才真正 arm timer
+  rtc_w32(RTC_ALARM_LOW, lo);  /* 这一步才真正 arm timer */
 
-  // 打开 IRQ，让 irq_pending 生效
+  /* 打开 IRQ，让 irq_pending 生效 */
   rtc_w32(RTC_IRQ_ENABLED, 1);
 }
 
@@ -111,9 +111,9 @@ void goldfish_rtc_irq_handler(uint32_t irq, void *arg)
 
   rtc_w32(RTC_CLEAR_INTERRUPT, 1);
 
-  // 这句现在已经可以正常看到
+  /* 这句现在已经可以正常看到 */
   platform_puts("goldfish rtc irq hit\n");
 
-  // 如果你希望一次性闹钟用完就关掉中断，可以顺便关掉：
-  // rtc_w32(RTC_IRQ_ENABLED, 0);
+  /* 如果你希望一次性闹钟用完就关掉中断，可以顺便关掉： */
+  /* rtc_w32(RTC_IRQ_ENABLED, 0); */
 }

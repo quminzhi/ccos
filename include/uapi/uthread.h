@@ -40,7 +40,15 @@ struct u_thread_info {
   uint64_t runs;       // 被调度运行次数（每次成为 RUNNING +1）
 };
 
-static const char* thread_state_name(int s) {
+/* Runqueue snapshot for a single hart. */
+#define RQ_MAX_TIDS THREAD_MAX
+struct rq_state {
+  uint32_t hart;
+  uint32_t len;
+  tid_t    tids[RQ_MAX_TIDS]; /* -1 for unused slots */
+};
+
+static const char* __attribute__((unused)) thread_state_name(int s) {
   switch (s) {
     case THREAD_UNUSED:
       return "UNUSED";

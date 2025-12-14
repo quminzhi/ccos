@@ -1,4 +1,4 @@
-// fdt_helper.h
+/* fdt_helper.h */
 #pragma once
 #include <stdint.h>
 

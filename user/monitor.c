@@ -1,10 +1,12 @@
-#include <stdint.h>
+/* monitor.c */
+
 #include <stddef.h>
+#include <stdint.h>
 
 #include "monitor.h"
+#include "syscall.h"  /* thread_list/thread_create/thread_kill/thread_exit... */
 #include "ulib.h"     /* u_printf/sleep/u_strcmp/u_atoi... */
 #include "uthread.h"  /* struct u_thread_info, thread_state_name() */
-#include "syscall.h"  /* thread_list/thread_create/thread_kill/thread_exit... */
 
 #ifndef THREAD_MAX
 #define THREAD_MAX 10
@@ -19,18 +21,20 @@
   (1u << 2)  /* Hide tid < MAX_HARTS idle threads per convention. */
 
 typedef struct {
-  int used;
-  tid_t tid;
+  int      used;
+  tid_t    tid;
   uint32_t seq;
   uint32_t period;    /* Period in ticks. */
-  int32_t remaining;  /* <0: forever, >=0: countdown. */
+  int32_t  remaining; /* <0: forever, >=0: countdown. */
   uint32_t flags;     /* Filter/option bitmask. */
 } mon_ctx_t;
 
 static mon_ctx_t g_mons[MON_MAX];
 
 /* Format a hart id for table output: -1 -> "---". */
-static void fmt_hart(int hart, char *buf, size_t bufsz) {
+static void
+fmt_hart(int hart, char *buf, size_t bufsz)
+{
   if (hart >= 0) {
     u_snprintf(buf, bufsz, "%d", hart);
   } else {
@@ -38,7 +42,9 @@ static void fmt_hart(int hart, char *buf, size_t bufsz) {
   }
 }
 
-static int mon_filter_pass(const mon_ctx_t *m, const struct u_thread_info *ti) {
+static int
+mon_filter_pass(const mon_ctx_t *m, const struct u_thread_info *ti)
+{
   if ((m->flags & MON_F_USER_ONLY) && !ti->is_user) {
     return 0;
   }
@@ -52,8 +58,9 @@ static int mon_filter_pass(const mon_ctx_t *m, const struct u_thread_info *ti) {
   return 1;
 }
 
-static void print_threads_table(const mon_ctx_t *m,
-                                const struct u_thread_info *infos, int n) {
+static void
+print_threads_table(const mon_ctx_t *m, const struct u_thread_info *infos, int n)
+{
   u_printf(" TID  STATE     MODE CPU LAST   MIG      RUNS  NAME\n");
   u_printf(" ---- --------- ---- --- ---- ------ --------- ---------------\n");
 
@@ -77,7 +84,9 @@ static void print_threads_table(const mon_ctx_t *m,
   }
 }
 
-static __attribute__((noreturn)) void monitor_main(void *arg) {
+static __attribute__((noreturn)) void
+monitor_main(void *arg)
+{
   mon_ctx_t *m = (mon_ctx_t *)arg;
 
   /* Note: if the shell kills this thread, the cleanup below might not run. */
@@ -108,7 +117,9 @@ static __attribute__((noreturn)) void monitor_main(void *arg) {
   }
 }
 
-static mon_ctx_t *mon_alloc(void) {
+static mon_ctx_t *
+mon_alloc(void)
+{
   for (int i = 0; i < MON_MAX; ++i) {
     if (!g_mons[i].used) {
       g_mons[i].used      = 1;

@@ -1,8 +1,9 @@
 #ifndef SYSFILE_H
 #define SYSFILE_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+
 #include "uapi.h"
 
 struct timespec;
@@ -19,4 +20,4 @@ uint64_t sys_read(int fd, char *buf, uint64_t len, struct trapframe *tf,
 long sys_clock_gettime(int clock_id, struct timespec *u_ts);
 long sys_irq_get_stats(struct irqstat_user *ubuf, size_t n);
 
-#endif  // SYSFILE_H
+#endif  /* SYSFILE_H */

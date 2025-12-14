@@ -1,23 +1,10 @@
-#include "thread.h"
-#include "syscall.h"
 #include "log.h"
-#include "ulib.h"
 #include "shell.h"
+#include "syscall.h"
+#include "thread.h"
+#include "ulib.h"
 
 void user_main(void *arg) __attribute__((noreturn));
-
-void assert_test(int *ptr, size_t len)
-{
-  ASSERT(ptr != NULL);
-  ASSERTF(len < 128, "len=%u", (unsigned)len);
-
-  unsigned addr = 0;
-  if (addr == 0) {
-    PANICF("flash write failed, addr=0x%08x", (unsigned)addr);
-  }
-
-  BREAK_IF(addr == 0);  // Trigger breakpoint only, do not halt.
-}
 
 void user_main(void *arg)
 {
@@ -43,6 +30,6 @@ void user_main(void *arg)
              status);
   }
 
-  // Should be unreachable.
+  /* Should be unreachable. */
   thread_exit(0);
 }

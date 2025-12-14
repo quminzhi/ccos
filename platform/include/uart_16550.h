@@ -1,7 +1,7 @@
 #ifndef BAREMETAL_UART_16550_H
 #define BAREMETAL_UART_16550_H
 
-// platform/include/uart_16550.h
+/* platform/include/uart_16550.h */
 #pragma once
 
 #include <stddef.h>
@@ -18,4 +18,4 @@ void uart16550_put_hex64(uint64_t x);
 uint32_t uart16550_get_irq(void);
 void uart16550_irq_handler(uint32_t irq, void *arg);
 
-#endif //BAREMETAL_UART_16550_H
+#endif /* BAREMETAL_UART_16550_H */

@@ -1,23 +1,29 @@
-#include "ulib.h"
-#include "syscall.h"
+/* ulib_stdio.c */
+
 #include <stdarg.h>
 
+#include "syscall.h"
+#include "ulib.h"
+
 /* Internal helper: write a buffer to stdout. */
-static int write_all(const char *buf, size_t len)
+static int
+write_all(const char *buf, size_t len)
 {
   /* For this simple system, assume a single sys_write completes. */
   int rc = write(1, buf, len);
   return rc;
 }
 
-int u_putchar(int c)
+int
+u_putchar(int c)
 {
   char ch = (char)c;
   int rc  = write_all(&ch, 1);
   return (rc == 1) ? c : -1;
 }
 
-int u_puts(const char *s)
+int
+u_puts(const char *s)
 {
   size_t len = u_strlen(s);
   int rc1    = write_all(s, len);
@@ -29,7 +35,8 @@ int u_puts(const char *s)
 }
 
 /* Convert integer to string (radix 10 or 16). */
-static char *u_itoa(long long value, char *buf_end, int base, int sign)
+static char *
+u_itoa(long long value, char *buf_end, int base, int sign)
 {
   /* buf_end points one past the buffer; write backwards. */
   unsigned long long v;
@@ -63,8 +70,8 @@ static char *u_itoa(long long value, char *buf_end, int base, int sign)
 }
 
 /* Internal: emit a char into buf with truncation bookkeeping. */
-static inline void out_char(char *buf, size_t *pos, size_t *total, size_t avail,
-                            char ch)
+static inline void
+out_char(char *buf, size_t *pos, size_t *total, size_t avail, char ch)
 {
   if (*pos < avail) {
     buf[*pos] = ch;
@@ -73,11 +80,12 @@ static inline void out_char(char *buf, size_t *pos, size_t *total, size_t avail,
   (*total)++;
 }
 
-static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
+static int
+u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
 {
-  size_t total = 0;  // Theoretical output length (excludes '\0').
-  size_t pos   = 0;  // Actual write position.
-  size_t avail = 0;  // Writable chars (leave room for '\0').
+  size_t total = 0;  /* Theoretical output length (excludes '\0'). */
+  size_t pos   = 0;  /* Actual write position. */
+  size_t avail = 0;  /* Writable chars (leave room for '\0'). */
 
   if (size > 0) {
     avail = size - 1;
@@ -99,8 +107,8 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
     }
 
     /* -------- flags -------- */
-    int left_adjust = 0;  // '-'
-    int zero_pad    = 0;  // '0'
+    int left_adjust = 0;  /* '-' */
+    int zero_pad    = 0;  /* '0' */
 
     for (;;) {
       if (*fmt == '-') {
@@ -168,7 +176,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
         if (!s) s = "(null)";
         str      = (char *)s;
         len      = u_strlen(s);
-        zero_pad = 0;  // No zero padding for strings.
+        zero_pad = 0;  /* No zero padding for strings. */
         break;
       }
 
@@ -187,7 +195,7 @@ static int u_vsnprintf(char *buf, size_t size, const char *fmt, va_list ap)
             break;
           case LEN_Z:
             v = (long long)va_arg(ap, long);
-            break;  // Simplified handling.
+            break;  /* Simplified handling. */
         }
         char *start = u_itoa(v, tmp + sizeof(tmp), 10, 1);
         str         = start;
@@ -325,18 +333,18 @@ int u_read_line(int fd, char *buf, int buf_size)
 
   for (;;) {
     if (used >= buf_size - 1) {
-      // Buffer full: terminate the line immediately.
+      /* Buffer full: terminate the line immediately. */
       break;
     }
 
     char c;
     int n = read(fd, &c, 1);
     if (n < 0) {
-      // Future: propagate specific error codes directly.
+      /* Future: propagate specific error codes directly. */
       return n;
     }
     if (n == 0) {
-      // EOF.
+      /* EOF. */
       if (used == 0) {
         return 0;
       }
@@ -344,7 +352,7 @@ int u_read_line(int fd, char *buf, int buf_size)
     }
 
     if (c == '\n' || c == '\r') {
-      // End of line: drop the newline without storing it.
+      /* End of line: drop the newline without storing it. */
       break;
     }
 
@@ -364,10 +372,10 @@ int u_getchar(void)
       return (int)ch;
     }
     if (n == 0) {
-      // EOF (unlikely yet); return -1.
+      /* EOF (unlikely yet); return -1. */
       return -1;
     }
-    // n < 0: propagate future error codes directly.
+    /* n < 0: propagate future error codes directly. */
     return n;
   }
 }
@@ -384,11 +392,11 @@ int u_gets(char *buf, int buf_size)
     char c;
     int n = read(FD_STDIN, &c, 1);
     if (n < 0) {
-      // Genuine read error: return the code.
+      /* Genuine read error: return the code. */
       return n;
     }
     if (n == 0) {
-      // EOF: if line is empty, return 0.
+      /* EOF: if line is empty, return 0. */
       if (used == 0) {
         return 0;
       }
@@ -398,17 +406,17 @@ int u_gets(char *buf, int buf_size)
     unsigned char uc = (unsigned char)c;
 
     /* ---- Ctrl-C: abort current line ---- */
-    if (uc == 0x03) {  // ASCII ETX, Ctrl-C
-      // Echo ^C newline to mimic common shells.
+    if (uc == 0x03) {  /* ASCII ETX, Ctrl-C */
+      /* Echo ^C newline to mimic common shells. */
       u_putchar('^');
       u_putchar('C');
       u_putchar('\n');
 
-      // Discard the current line.
+      /* Discard the current line. */
       buf[0] = '\0';
       used   = 0;
 
-      // Tell caller this line was interrupted.
+      /* Tell caller this line was interrupted. */
       return U_GETS_INTR;
     }
 
@@ -422,7 +430,7 @@ int u_gets(char *buf, int buf_size)
     if (c == '\b' || uc == 0x7f) {
       if (used > 0) {
         used--;
-        // Erase last char on terminal: backspace, space, backspace.
+        /* Erase last char on terminal: backspace, space, backspace. */
         u_putchar('\b');
         u_putchar(' ');
         u_putchar('\b');
@@ -440,8 +448,8 @@ int u_gets(char *buf, int buf_size)
       buf[used++] = c;
       u_putchar(c);
     } else {
-      // Line too long: drop extra chars (optional bell).
-      // u_putchar('\a');
+      /* Line too long: drop extra chars (optional bell). */
+      /* u_putchar('\a'); */
     }
   }
 
@@ -457,16 +465,16 @@ int u_readn(int fd, void *buf, int nbytes)
   while (total < nbytes) {
     int n = read(fd, p + total, (uint64_t)(nbytes - total));
     if (n < 0) {
-      // Future: propagate precise error codes.
+      /* Future: propagate precise error codes. */
       return n;
     }
     if (n == 0) {
-      // EOF: stop early.
+      /* EOF: stop early. */
       break;
     }
     total += n;
   }
-  return total;  // May be < nbytes if EOF hit.
+  return total;  /* May be < nbytes if EOF hit. */
 }
 
 int u_read_until(int fd, char *buf, int buf_size, char delim)
@@ -479,7 +487,7 @@ int u_read_until(int fd, char *buf, int buf_size, char delim)
 
   for (;;) {
     if (used >= buf_size - 1) {
-      // Buffer full.
+      /* Buffer full. */
       break;
     }
 
@@ -488,7 +496,7 @@ int u_read_until(int fd, char *buf, int buf_size, char delim)
       return n;
     }
     if (n == 0) {
-      // EOF.
+      /* EOF. */
       break;
     }
 
@@ -496,7 +504,7 @@ int u_read_until(int fd, char *buf, int buf_size, char delim)
     used++;
 
     if (c == delim) {
-      break;  // Reached delimiter.
+      break;  /* Reached delimiter. */
     }
   }
 

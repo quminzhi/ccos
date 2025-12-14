@@ -1,11 +1,13 @@
+/* shell.c */
+
+#include "datetime.h"
+#include "monitor.h"
 #include "shell.h"
-#include "ulib.h"
+#include "spawn.h"
 #include "syscall.h"
+#include "ulib.h"
 #include "uthread.h"
 #include "utime.h"
-#include "datetime.h"
-#include "spawn.h"
-#include "monitor.h"
 
 /* -------------------------------------------------------------------------- */
 /* Configuration.                                                             */
@@ -16,14 +18,16 @@
 #define SHELL_MAX_PROCS 4
 
 typedef struct ShellProc {
-  int in_use;
+  int  in_use;
   char line[SHELL_MAX_LINE];
 } ShellProc;
 
 static ShellProc g_procs[SHELL_MAX_PROCS];
 static struct irqstat_user g_irqstat_buf[IRQSTAT_MAX_IRQ];
 
-static ShellProc* shell_proc_alloc(const char* line) {
+static ShellProc*
+shell_proc_alloc(const char* line)
+{
   for (int i = 0; i < SHELL_MAX_PROCS; ++i) {
     ShellProc* p = &g_procs[i];
     if (!p->in_use) {
@@ -44,7 +48,9 @@ static ShellProc* shell_proc_alloc(const char* line) {
   return NULL;  /* No available slot. */
 }
 
-static void shell_proc_free(ShellProc* p) {
+static void
+shell_proc_free(ShellProc* p)
+{
   if (!p) return;
   p->in_use  = 0;
   p->line[0] = '\0';
@@ -55,7 +61,9 @@ static void shell_proc_free(ShellProc* p) {
 /* -------------------------------------------------------------------------- */
 
 /* Lightweight decimal atoi with optional +/- prefix and no error checks. */
-static int shell_atoi(const char* s) {
+static int
+shell_atoi(const char* s)
+{
   int neg = 0;
   int val = 0;
 
@@ -79,7 +87,9 @@ static int shell_atoi(const char* s) {
 #define SHELL_READ_INTR -2 /* Interrupted by Ctrl-C. */
 #define SHELL_READ_ERR  -1 /* Other errors. */
 
-static int shell_read_line(char* line, int line_size) {
+static int
+shell_read_line(char* line, int line_size)
+{
   int len = u_gets(line, line_size);
   if (len == U_GETS_INTR) {
     return SHELL_READ_INTR;
@@ -94,7 +104,9 @@ static int shell_read_line(char* line, int line_size) {
 }
 
 /* Split a line by whitespace into argv[], inserting '\0' delimiters in-place. */
-static int shell_parse_line(char* line, char** argv, int max_args) {
+static int
+shell_parse_line(char* line, char** argv, int max_args)
+{
   int argc = 0;
   char* p  = line;
 
@@ -148,6 +160,7 @@ static void cmd_sleep(int argc, char** argv);
 static void cmd_ps(int argc, char** argv);
 static void cmd_jobs(int argc, char** argv);
 static void cmd_kill(int argc, char** argv);
+static void cmd_rq(int argc, char** argv);
 static void cmd_date(int argc, char** argv);
 static void cmd_uptime(int argc, char** argv);
 static void cmd_irqstat(int argc, char** argv);
@@ -162,6 +175,7 @@ static const shell_cmd_t g_shell_cmds[] = {
     {"ps",      cmd_ps,      "list threads",                                    1},
     {"jobs",    cmd_jobs,    "list user threads",                               1},
     {"kill",    cmd_kill,    "kill <tid>",                                      1},
+    {"rq",      cmd_rq,      "show per-hart runqueues",                         1},
     {"date",    cmd_date,    "date",                                            0},
     {"uptime",  cmd_uptime,  "uptime",                                          0},
     {"irqstat", cmd_irqstat, "irqstat",                                         0},
@@ -177,7 +191,9 @@ static const int g_shell_cmd_count =
     (int)(sizeof(g_shell_cmds) / sizeof(g_shell_cmds[0]));
 
 /* Command lookup. */
-static const shell_cmd_t* shell_find_cmd(const char* name) {
+static const shell_cmd_t*
+shell_find_cmd(const char* name)
+{
   for (int i = 0; i < g_shell_cmd_count; ++i) {
     if (u_strcmp(name, g_shell_cmds[i].name) == 0) {
       return &g_shell_cmds[i];
@@ -190,7 +206,9 @@ static const shell_cmd_t* shell_find_cmd(const char* name) {
 /* Command implementations.                                                   */
 /* -------------------------------------------------------------------------- */
 
-static void cmd_help(int argc, char** argv) {
+static void
+cmd_help(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -200,7 +218,9 @@ static void cmd_help(int argc, char** argv) {
   }
 }
 
-static void cmd_echo(int argc, char** argv) {
+static void
+cmd_echo(int argc, char** argv)
+{
   if (argc <= 1) {
     u_puts(""); /* Print an empty line. */
     return;
@@ -211,7 +231,9 @@ static void cmd_echo(int argc, char** argv) {
   }
 }
 
-static void cmd_sleep(int argc, char** argv) {
+static void
+cmd_sleep(int argc, char** argv)
+{
   if (argc < 2) {
     u_puts("usage: sleep <ticks>");
     return;
@@ -228,7 +250,9 @@ static void cmd_sleep(int argc, char** argv) {
   u_puts("done.");
 }
 
-static void cmd_exit(int argc, char** argv) {
+static void
+cmd_exit(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -236,7 +260,9 @@ static void cmd_exit(int argc, char** argv) {
   thread_exit(0); /* Does not return. */
 }
 
-static void cmd_ps(int argc, char** argv) {
+static void
+cmd_ps(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -277,7 +303,9 @@ static void cmd_ps(int argc, char** argv) {
   }
 }
 
-static void cmd_jobs(int argc, char** argv) {
+static void
+cmd_jobs(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -302,7 +330,9 @@ static void cmd_jobs(int argc, char** argv) {
   }
 }
 
-static void cmd_kill(int argc, char** argv) {
+static void
+cmd_kill(int argc, char** argv)
+{
   if (argc < 2) {
     u_puts("usage: kill <tid>");
     return;
@@ -330,7 +360,42 @@ static void cmd_kill(int argc, char** argv) {
   }
 }
 
-static void cmd_date(int argc, char** argv) {
+static void
+cmd_rq(int argc, char** argv)
+{
+  (void)argc;
+  (void)argv;
+
+  struct rq_state states[MAX_HARTS];
+  int n = runqueue_snapshot(states, MAX_HARTS);
+  if (n < 0) {
+    u_printf("rq: syscall failed, rc=%d\n", n);
+    return;
+  }
+
+  u_printf("hart  len  queue\n");
+  u_printf("---- ----  ------------------------------\n");
+
+  for (int i = 0; i < n; ++i) {
+    const struct rq_state* s = &states[i];
+    u_printf("%-4u %-4u  ", (unsigned)s->hart, (unsigned)s->len);
+    if (s->len == 0) {
+      u_puts("<empty>");
+      continue;
+    }
+    for (uint32_t k = 0; k < s->len; ++k) {
+      u_printf("%d", (int)s->tids[k]);
+      if (k + 1 < s->len) {
+        u_puts(" -> ");
+      }
+    }
+    u_printf("\n");
+  }
+}
+
+static void
+cmd_date(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -347,7 +412,9 @@ static void cmd_date(int argc, char** argv) {
            dt.hour, dt.min, dt.sec);
 }
 
-static void cmd_uptime(int argc, char** argv) {
+static void
+cmd_uptime(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -360,7 +427,9 @@ static void cmd_uptime(int argc, char** argv) {
            (unsigned long long)ts.tv_sec, (unsigned)ts.tv_nsec);
 }
 
-static void cmd_irqstat(int argc, char** argv) {
+static void
+cmd_irqstat(int argc, char** argv)
+{
   (void)argc;
   (void)argv;
 
@@ -388,11 +457,15 @@ static void cmd_irqstat(int argc, char** argv) {
   }
 }
 
-static void cmd_spawn(int argc, char** argv) {
+static void
+cmd_spawn(int argc, char** argv)
+{
   spawn(argc, argv);
 }
 
-static void cmd_mon(int argc, char** argv) {
+static void
+cmd_mon(int argc, char** argv)
+{
   if (argc <= 1) {
     u_puts(
         "usage:\n"

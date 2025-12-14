@@ -3,4 +3,4 @@
 
 typedef int tid_t;
 
-#endif // TYPES_H
+#endif /* TYPES_H */
