@@ -22,8 +22,8 @@ CPUS     ?= 1
 # ---------------------------------------------------------------------------
 
 CROSS_COMPILE ?= riscv64-unknown-elf-
-#OPENSBI_CROSS_COMPILE ?= riscv64-unknown-linux-gnu-
-OPENSBI_CROSS_COMPILE ?= riscv64-unknown-elf-
+OPENSBI_CROSS_COMPILE ?= riscv64-unknown-linux-gnu-
+#OPENSBI_CROSS_COMPILE ?= riscv64-unknown-elf-
 
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)gcc
