@@ -15,7 +15,7 @@
 RELEASE ?= NO
 
 # CPU：make CPUS=4
-CPUS     ?= 1
+CPUS     ?= 2
 
 # ---------------------------------------------------------------------------
 # 工具链配置
@@ -28,6 +28,7 @@ OPENSBI_CROSS_COMPILE ?= riscv64-unknown-linux-gnu-
 CC      := $(CROSS_COMPILE)gcc
 LD      := $(CROSS_COMPILE)gcc
 OBJDUMP := $(CROSS_COMPILE)objdump
+OBJCOPY := $(CROSS_COMPILE)objcopy
 NM      := $(CROSS_COMPILE)nm
 SIZE    := $(CROSS_COMPILE)size
 
@@ -58,6 +59,7 @@ OUT_DIR      := $(BUILD_DIR)/out
 
 TARGET_NAME  := kernel
 TARGET       := $(OUT_DIR)/$(TARGET_NAME).elf
+TARGET_BIN   := $(OUT_DIR)/$(TARGET_NAME).bin
 MAP_FILE     := $(OUT_DIR)/$(TARGET_NAME).map
 # 整个程序的总汇编和符号表
 TARGET_DISASM := $(OUT_DIR)/$(TARGET_NAME).disasm
@@ -174,13 +176,18 @@ endif
 
 all: build
 
-build: $(TARGET) $(DTS) disasm-all symbols objdump-objs size
+build: $(TARGET) $(TARGET_BIN) $(DTS) disasm-all symbols objdump-objs size
 
 # 链接规则：注意先保证目录存在
 $(TARGET): $(OBJS)
 	@mkdir -p $(dir $@)
 	@echo "  LD    $@"
 	$(LD) $(CFLAGS) $(OBJS) -o $@ $(LDFLAGS)
+
+$(TARGET_BIN): $(TARGET)
+	@echo "  OBJCOPY  $@"
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -O binary $< $@
 
 # 可选：统一建几个输出目录（非必须，用了也不会出问题）
 $(OUT_DIR) $(OBJ_DIR) $(DUMP_DIR):
@@ -242,13 +249,18 @@ $(DUMP_DIR)/%.objdump: $(OBJ_DIR)/%.o
 # OpenSBI 集成
 # ---------------------------------------------------------------------------
 
-OPENSBI_DIR        := external/opensbi
+OPENSBI_DIR        := opensbi
 OPENSBI_BUILD_DIR  := $(BUILD_DIR)/opensbi
 OPENSBI_PLATFORM   := generic
 
 # 我们使用 OpenSBI 的 fw_jump.elf 作为 QEMU 的 BIOS
 OPENSBI_FW_JUMP     := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.elf
 OPENSBI_FW_JUMP_BIN := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.bin
+
+# fsbl 需一致
+OPENSBI_FW_TEXT_START   ?= 0x80000000
+OPENSBI_FW_JUMP_ADDR    ?= 0x80200000
+OPENSBI_FW_JUMP_FDT_ADDR?= 0x88000000
 
 OPENSBI_DOCKER_CROSS_COMPILE ?= riscv64-linux-gnu-
 OPENSBI_DOCKER_IMAGE ?= opensbi-build:linux-gnu
@@ -263,6 +275,19 @@ OPENSBI_DOCKERFILE := $(PROJECT_ROOT)/Dockerfile.opensbi
 .PHONY: opensbi docker-opensbi
 
 opensbi: $(OPENSBI_FW_JUMP)
+
+# $(OPENSBI_FW_JUMP):
+# 	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM) FW_JUMP=y"
+# 	@echo "         FW_TEXT_START=$(OPENSBI_FW_TEXT_START) FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) FW_JUMP_FDT_ADDR=$(OPENSBI_FW_JUMP_FDT_ADDR)"
+# 	@mkdir -p $(OPENSBI_BUILD_DIR)
+# 	$(MAKE) -C $(OPENSBI_DIR) \
+# 		PLATFORM=$(OPENSBI_PLATFORM) \
+# 		FW_JUMP=y \
+# 		FW_TEXT_START=$(OPENSBI_FW_TEXT_START) \
+# 		FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) \
+# 		FW_JUMP_FDT_ADDR=$(OPENSBI_FW_JUMP_FDT_ADDR) \
+# 		CROSS_COMPILE=$(OPENSBI_CROSS_COMPILE) \
+# 		O=$(abspath $(OPENSBI_BUILD_DIR))
 
 $(OPENSBI_FW_JUMP):
 	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM)"
