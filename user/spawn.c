@@ -109,7 +109,7 @@ spawn_usage(void)
       "  spawn kill\n"
       "notes:\n"
       "  - print_every is in 'iterations' (not ticks)\n"
-      "  - print_every=0 disables all worker logs; default spin=0, others=50\n"
+      "  - print_every=0 disables all worker logs; default 0\n"
       "  - N is capped to SPAWN_MAX\n");
 }
 

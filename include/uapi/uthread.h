@@ -48,7 +48,8 @@ struct rq_state {
   tid_t    tids[RQ_MAX_TIDS]; /* -1 for unused slots */
 };
 
-static const char* __attribute__((unused)) thread_state_name(int s) {
+static inline const char* thread_state_name(int s) __attribute__((unused));
+static inline const char* thread_state_name(int s) {
   switch (s) {
     case THREAD_UNUSED:
       return "UNUSED";

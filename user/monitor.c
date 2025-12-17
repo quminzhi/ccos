@@ -8,11 +8,8 @@
 #include "ulib.h"     /* u_printf/sleep/u_strcmp/u_atoi... */
 #include "uthread.h"  /* struct u_thread_info, thread_state_name() */
 
-#ifndef THREAD_MAX
-#define THREAD_MAX 10
-#endif
-
 #define MON_MAX            4
+#define MON_THREAD_LIST_MAX 32
 
 /* Flags: optional filters. */
 #define MON_F_USER_ONLY    (1u << 0)  /* Print user threads only. */
@@ -30,6 +27,7 @@ typedef struct {
 } mon_ctx_t;
 
 static mon_ctx_t g_mons[MON_MAX];
+static struct u_thread_info g_mon_infos[MON_MAX][MON_THREAD_LIST_MAX];
 
 /* Format a hart id for table output: -1 -> "---". */
 static void
@@ -88,6 +86,10 @@ static __attribute__((noreturn)) void
 monitor_main(void *arg)
 {
   mon_ctx_t *m = (mon_ctx_t *)arg;
+  int idx      = (int)(m - &g_mons[0]);
+  if (idx < 0 || idx >= MON_MAX) {
+    thread_exit(-1);
+  }
 
   /* Note: if the shell kills this thread, the cleanup below might not run. */
   for (;;) {
@@ -97,8 +99,8 @@ monitor_main(void *arg)
 
     sleep(m->period);
 
-    struct u_thread_info infos[THREAD_MAX];
-    int n = thread_list(infos, THREAD_MAX);
+    struct u_thread_info *infos = g_mon_infos[idx];
+    int n = thread_list(infos, MON_THREAD_LIST_MAX);
     if (n < 0) {
       u_printf("\n[mon tid=%d] thread_list failed rc=%d\n", (int)m->tid, n);
     } else {
@@ -191,8 +193,8 @@ void mon_list(void) {
 }
 
 void mon_once(void) {
-  struct u_thread_info infos[THREAD_MAX];
-  int n = thread_list(infos, THREAD_MAX);
+  struct u_thread_info infos[MON_THREAD_LIST_MAX];
+  int n = thread_list(infos, MON_THREAD_LIST_MAX);
   if (n < 0) {
     u_printf("mon: thread_list failed rc=%d\n", n);
     return;
@@ -202,4 +204,8 @@ void mon_once(void) {
   mon_ctx_t fake = {0};
   fake.flags     = 0;
   print_threads_table(&fake, infos, n);
+
+  if (n == MON_THREAD_LIST_MAX) {
+    u_puts("mon: output truncated (increase MON_THREAD_LIST_MAX if needed)");
+  }
 }

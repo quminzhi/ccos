@@ -16,6 +16,7 @@
 #define SHELL_MAX_LINE  128
 #define SHELL_MAX_ARGS  8
 #define SHELL_MAX_PROCS 4
+#define SHELL_THREAD_LIST_MAX 32
 
 typedef struct ShellProc {
   int  in_use;
@@ -24,6 +25,7 @@ typedef struct ShellProc {
 
 static ShellProc g_procs[SHELL_MAX_PROCS];
 static struct irqstat_user g_irqstat_buf[IRQSTAT_MAX_IRQ];
+static struct u_thread_info g_thread_infos[SHELL_THREAD_LIST_MAX];
 
 static ShellProc*
 shell_proc_alloc(const char* line)
@@ -266,8 +268,7 @@ cmd_ps(int argc, char** argv)
   (void)argc;
   (void)argv;
 
-  struct u_thread_info infos[THREAD_MAX];
-  int n = thread_list(infos, THREAD_MAX);
+  int n = thread_list(g_thread_infos, SHELL_THREAD_LIST_MAX);
   if (n < 0) {
     u_printf("ps: thread_list failed, rc=%d\n", n);
     return;
@@ -277,7 +278,7 @@ cmd_ps(int argc, char** argv)
   u_printf(" ---- --------- ---- --- ---- ------ --------- ---------------\n");
 
   for (int i = 0; i < n; ++i) {
-    const struct u_thread_info* ti = &infos[i];
+    const struct u_thread_info* ti = &g_thread_infos[i];
     const char* st                 = thread_state_name(ti->state);
     char mode                      = ti->is_user ? 'U' : 'S';
 
@@ -301,6 +302,10 @@ cmd_ps(int argc, char** argv)
              cpu_s, last_s, (unsigned)ti->migrations,
              (unsigned long long)ti->runs, ti->name);
   }
+
+  if (n == SHELL_THREAD_LIST_MAX) {
+    u_puts("ps: output truncated (increase SHELL_THREAD_LIST_MAX if needed)");
+  }
 }
 
 static void
@@ -309,8 +314,7 @@ cmd_jobs(int argc, char** argv)
   (void)argc;
   (void)argv;
 
-  struct u_thread_info infos[THREAD_MAX];
-  int n = thread_list(infos, THREAD_MAX);
+  int n = thread_list(g_thread_infos, SHELL_THREAD_LIST_MAX);
   if (n < 0) {
     u_printf("jobs: sys_thread_list failed, rc=%d\n", n);
     return;
@@ -320,13 +324,17 @@ cmd_jobs(int argc, char** argv)
   u_printf(" ---- --------- ------------\n");
 
   for (int i = 0; i < n; ++i) {
-    const struct u_thread_info* ti = &infos[i];
+    const struct u_thread_info* ti = &g_thread_infos[i];
     if (!ti->is_user) {
       continue;  /* Only show user-mode threads. */
     }
     /* Additional filtering (shell/user_main) can be added here if desired. */
     u_printf(" %-4d %-9s %s\n", ti->tid, thread_state_name(ti->state),
              ti->name);
+  }
+
+  if (n == SHELL_THREAD_LIST_MAX) {
+    u_puts("jobs: output truncated (increase SHELL_THREAD_LIST_MAX if needed)");
   }
 }
 
