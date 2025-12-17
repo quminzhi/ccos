@@ -10,6 +10,7 @@
 #include "plic.h"
 #include "timer.h"
 #include "panic.h"
+#include "libfdt.h"
 
 static const void* g_dtb;  /* 全局 DTB 指针 */
 
@@ -142,6 +143,39 @@ void platform_rtc_init(void) {
 }
 
 uint64_t platform_rtc_read_ns(void) {
+  if (!goldfish_rtc_is_available()) {
+    /*
+     * 无 RTC fallback：
+     *   - 读 time CSR（tick）
+     *   - 读 /cpus/timebase-frequency（Hz）
+     *   - 换算为 ns
+     */
+    uint32_t hz = 0;
+    if (g_dtb) {
+      int off = fdt_path_offset(g_dtb, "/cpus");
+      if (off >= 0) {
+        int len = 0;
+        const fdt32_t* p = (const fdt32_t*)fdt_getprop(g_dtb, off,
+                                                       "timebase-frequency",
+                                                       &len);
+        if (p && len >= (int)sizeof(fdt32_t)) {
+          hz = fdt32_to_cpu(p[0]);
+        }
+      }
+    }
+    if (hz == 0) {
+      hz = 10000000u; /* 常见默认：10MHz（QEMU virt 也是这个量级） */
+    }
+
+    uint64_t ticks = csr_read(time);
+    /*
+     * 避免 __int128 除法（会引入 __udivti3 依赖）：
+     *   ns = (ticks / hz) * 1e9 + (ticks % hz) * 1e9 / hz
+     */
+    uint64_t sec = ticks / (uint64_t)hz;
+    uint64_t rem = ticks - sec * (uint64_t)hz;
+    return sec * 1000000000ull + (rem * 1000000000ull) / (uint64_t)hz;
+  }
   return goldfish_rtc_read_ns();
 }
 
@@ -252,9 +286,11 @@ void platform_boot_hart_init(uintptr_t hartid) {
   uint32_t uart_irq = uart16550_get_irq();
   platform_register_irq_handler(uart_irq, uart16550_irq_handler, NULL, "uart0");
 
-  uint32_t rtc_irq = goldfish_rtc_get_irq();
-  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler, NULL,
-                                "rtc0");
+  if (goldfish_rtc_is_available()) {
+    uint32_t rtc_irq = goldfish_rtc_get_irq();
+    platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler, NULL,
+                                  "rtc0");
+  }
 }
 
 void platform_secondary_hart_init(uintptr_t hartid) {

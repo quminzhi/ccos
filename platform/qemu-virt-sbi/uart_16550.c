@@ -3,6 +3,7 @@
 #include "platform.h"
 #include <stdint.h>
 #include "fdt_helper.h"
+#include "libfdt.h"
 
 #include "log.h"
 #include "cpu.h"
@@ -36,15 +37,42 @@
 
 extern void console_on_char_from_irq(uint8_t ch);
 
-static volatile uint8_t *uart_base;
+static uintptr_t uart_base;
 static uint32_t uart_irq;
+static uint32_t uart_reg_shift;
+static uint32_t uart_reg_io_width = 1;
+static uint32_t uart_reg_offset;
 
-static inline void uart_w(uint32_t off, uint8_t v) {
-  uart_base[off] = v;
+static inline uintptr_t uart_reg_addr(uint32_t reg_index) {
+  return uart_base + (uintptr_t)uart_reg_offset +
+         ((uintptr_t)reg_index << uart_reg_shift);
 }
 
-static inline uint8_t uart_r(uint32_t off) {
-  return uart_base[off];
+static inline void uart_w(uint32_t reg_index, uint8_t v) {
+  uintptr_t addr = uart_reg_addr(reg_index);
+  switch (uart_reg_io_width) {
+    case 4:
+      *(volatile uint32_t *)addr = (uint32_t)v;
+      break;
+    case 2:
+      *(volatile uint16_t *)addr = (uint16_t)v;
+      break;
+    default:
+      *(volatile uint8_t *)addr = v;
+      break;
+  }
+}
+
+static inline uint8_t uart_r(uint32_t reg_index) {
+  uintptr_t addr = uart_reg_addr(reg_index);
+  switch (uart_reg_io_width) {
+    case 4:
+      return (uint8_t)(*(volatile uint32_t *)addr);
+    case 2:
+      return (uint8_t)(*(volatile uint16_t *)addr);
+    default:
+      return *(volatile uint8_t *)addr;
+  }
 }
 
 static inline uint8_t uart_rbr_read(void) {
@@ -79,6 +107,33 @@ uint32_t uart16550_get_irq(void) {
   return uart_irq;
 }
 
+static void uart16550_parse_dt_params(const void *fdt) {
+  if (!fdt) return;
+
+  int off = fdt_node_offset_by_compatible(fdt, -1, "ns16550a");
+  if (off < 0) return;
+
+  int len = 0;
+
+  const fdt32_t *p = (const fdt32_t *)fdt_getprop(fdt, off, "reg-shift", &len);
+  if (p && len >= (int)sizeof(fdt32_t)) {
+    uart_reg_shift = fdt32_to_cpu(p[0]);
+  }
+
+  p = (const fdt32_t *)fdt_getprop(fdt, off, "reg-io-width", &len);
+  if (p && len >= (int)sizeof(fdt32_t)) {
+    uint32_t w = fdt32_to_cpu(p[0]);
+    if (w == 1 || w == 2 || w == 4) {
+      uart_reg_io_width = w;
+    }
+  }
+
+  p = (const fdt32_t *)fdt_getprop(fdt, off, "reg-offset", &len);
+  if (p && len >= (int)sizeof(fdt32_t)) {
+    uart_reg_offset = fdt32_to_cpu(p[0]);
+  }
+}
+
 void uart16550_init(void) {
   const void *fdt = platform_get_dtb();
   uint64_t base, size;
@@ -94,8 +149,9 @@ void uart16550_init(void) {
     return;
   }
 
-  uart_base = (volatile uint8_t *)(uintptr_t)base;
+  uart_base = (uintptr_t)base;
   uart_irq  = irq;
+  uart16550_parse_dt_params(fdt);
 
   /* baud rate setting or others */
   uart_ier_write(UART_IER_ERBFI);

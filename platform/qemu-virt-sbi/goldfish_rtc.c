@@ -23,6 +23,7 @@
 
 static volatile uint32_t *rtc_base;
 static uint32_t rtc_irq;
+static int rtc_ready;
 
 static inline uint32_t rtc_r32(uint32_t off) { return rtc_base[off / 4]; }
 
@@ -33,6 +34,10 @@ static inline void rtc_w32(uint32_t off, uint32_t val)
 
 uint32_t goldfish_rtc_get_irq(void) {
   return rtc_irq;
+}
+
+int goldfish_rtc_is_available(void) {
+  return rtc_ready;
 }
 
 void goldfish_rtc_init(void)
@@ -53,6 +58,7 @@ void goldfish_rtc_init(void)
 
   rtc_base = (volatile uint32_t *)(uintptr_t)base; /* 暂时物理=虚拟 */
   rtc_irq  = irq;
+  rtc_ready = 1;
 
   /* 清一下可能遗留的状态 */
   rtc_w32(RTC_CLEAR_ALARM, 1);
@@ -64,6 +70,9 @@ void goldfish_rtc_init(void)
 
 uint64_t goldfish_rtc_read_ns(void)
 {
+  if (!rtc_ready || !rtc_base) {
+    return 0;
+  }
   /* 文档要求：先读 TIME_LOW，再读 TIME_HIGH，这样 QEMU 会给你一个原子 snapshot */
   uint32_t lo = rtc_r32(RTC_TIME_LOW);
   uint32_t hi = rtc_r32(RTC_TIME_HIGH);
@@ -72,6 +81,9 @@ uint64_t goldfish_rtc_read_ns(void)
 
 void goldfish_rtc_set_alarm_after(uint64_t delay_ns)
 {
+  if (!rtc_ready || !rtc_base) {
+    return;
+  }
   uint64_t now  = goldfish_rtc_read_ns();
   uint64_t when = now + delay_ns;
 

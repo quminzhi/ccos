@@ -4,6 +4,9 @@
 
 void goldfish_rtc_init(void);
 
+/* rtc 是否可用（是否在 FDT 中找到并初始化成功） */
+int goldfish_rtc_is_available(void);
+
 /* 读 RTC 的 64bit 时间戳 (ns) */
 uint64_t goldfish_rtc_read_ns(void);
 
