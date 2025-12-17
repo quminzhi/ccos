@@ -56,12 +56,16 @@ BUILD_DIR    := build
 OBJ_DIR      := $(BUILD_DIR)/obj
 DUMP_DIR     := $(BUILD_DIR)/dump
 OUT_DIR      := $(BUILD_DIR)/out
+TMP_DIR      := $(BUILD_DIR)/tmp
+
+# Some toolchains use /tmp for intermediate files; keep everything within build/.
+export TMPDIR := $(abspath $(TMP_DIR))
 
 TARGET_NAME  := kernel
 TARGET       := $(OUT_DIR)/$(TARGET_NAME).elf
 TARGET_BIN   := $(OUT_DIR)/$(TARGET_NAME).bin
 MAP_FILE     := $(OUT_DIR)/$(TARGET_NAME).map
-# 整个程序的总汇编和符号表
+
 TARGET_DISASM := $(OUT_DIR)/$(TARGET_NAME).disasm
 TARGET_SYMS   := $(OUT_DIR)/$(TARGET_NAME).sym
 
@@ -139,12 +143,8 @@ CFLAGS += -DMAX_HARTS=$(CPUS)
 # Debug / Release 特定 CFLAGS
 # ========================
 ifeq ($(RELEASE),YES)
-  # ---- Release：偏性能，兼顾体积 ----
   CFLAGS += -O2 -DNDEBUG -flto -DKERNEL_BUILD_TYPE=\"release\"
-  # 如果后面发现体积比性能更重要，可以改成：
-  # CFLAGS += -Os -DNDEBUG -flto
 else
-  # ---- Debug：调试友好 ----
   CFLAGS += -g3 -Og -fno-omit-frame-pointer
   CFLAGS += -fno-inline
   CFLAGS += -fno-optimize-sibling-calls
@@ -176,7 +176,7 @@ endif
 
 all: build
 
-build: $(TARGET) $(TARGET_BIN) $(DTS) disasm-all symbols objdump-objs size
+build: $(TMP_DIR) $(TARGET) $(TARGET_BIN) $(DTS) disasm-all symbols objdump-objs size
 
 # 链接规则：注意先保证目录存在
 $(TARGET): $(OBJS)
@@ -193,14 +193,17 @@ $(TARGET_BIN): $(TARGET)
 $(OUT_DIR) $(OBJ_DIR) $(DUMP_DIR):
 	@mkdir -p $@
 
+$(TMP_DIR):
+	@mkdir -p $@
+
 # C 源文件编译规则
-$(OBJ_DIR)/%.o: %.c
+$(OBJ_DIR)/%.o: %.c | $(TMP_DIR)
 	@mkdir -p $(dir $@)
 	@echo "  CC    $<"
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # 汇编源文件 (.S, 需要预处理) 编译规则
-$(OBJ_DIR)/%.o: %.S
+$(OBJ_DIR)/%.o: %.S | $(TMP_DIR)
 	@mkdir -p $(dir $@)
 	@echo "  AS    $<"
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -274,28 +277,24 @@ OPENSBI_DOCKERFILE := $(PROJECT_ROOT)/Dockerfile.opensbi
 
 .PHONY: opensbi docker-opensbi
 
-opensbi: $(OPENSBI_FW_JUMP)
-
-# $(OPENSBI_FW_JUMP):
-# 	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM) FW_JUMP=y"
-# 	@echo "         FW_TEXT_START=$(OPENSBI_FW_TEXT_START) FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) FW_JUMP_FDT_ADDR=$(OPENSBI_FW_JUMP_FDT_ADDR)"
-# 	@mkdir -p $(OPENSBI_BUILD_DIR)
-# 	$(MAKE) -C $(OPENSBI_DIR) \
-# 		PLATFORM=$(OPENSBI_PLATFORM) \
-# 		FW_JUMP=y \
-# 		FW_TEXT_START=$(OPENSBI_FW_TEXT_START) \
-# 		FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) \
-# 		FW_JUMP_FDT_ADDR=$(OPENSBI_FW_JUMP_FDT_ADDR) \
-# 		CROSS_COMPILE=$(OPENSBI_CROSS_COMPILE) \
-# 		O=$(abspath $(OPENSBI_BUILD_DIR))
+opensbi: $(TMP_DIR) $(OPENSBI_FW_JUMP)
 
 $(OPENSBI_FW_JUMP):
-	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM)"
+	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM) FW_JUMP=y"
+	@echo "         FW_TEXT_START=$(OPENSBI_FW_TEXT_START) FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) FW_JUMP_FDT_ADDR=$(OPENSBI_FW_JUMP_FDT_ADDR)"
 	@mkdir -p $(OPENSBI_BUILD_DIR)
 	$(MAKE) -C $(OPENSBI_DIR) \
 		PLATFORM=$(OPENSBI_PLATFORM) \
-		CROSS_COMPILE=$(OPENSBI_CROSS_COMPILE) \
-		O=$(abspath $(OPENSBI_BUILD_DIR))
+		FW_JUMP=y \
+		FW_TEXT_START=$(OPENSBI_FW_TEXT_START) \
+		FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) \
+		FW_JUMP_FDT_ADDR=$(OPENSBI_FW_JUMP_FDT_ADDR) \
+			CROSS_COMPILE=$(OPENSBI_CROSS_COMPILE) \
+			O=$(abspath $(OPENSBI_BUILD_DIR))
+
+# fw_jump.bin is generated alongside fw_jump.elf; keep it as an explicit target
+# so QEMU rules can depend on it.
+$(OPENSBI_FW_JUMP_BIN): $(OPENSBI_FW_JUMP)
 
 docker-opensbi: docker-opensbi-image
 	@echo "  OPENSBI (docker) PLATFORM=$(OPENSBI_PLATFORM) O=$(OPENSBI_BUILD_DIR)"
@@ -307,6 +306,10 @@ docker-opensbi: docker-opensbi-image
 		"$(OPENSBI_DOCKER_IMAGE)" \
 		bash -lc 'make -C "$(OPENSBI_DIR)" \
 			PLATFORM="$(OPENSBI_PLATFORM)" \
+			FW_JUMP=y \
+			FW_TEXT_START="$(OPENSBI_FW_TEXT_START)" \
+			FW_JUMP_ADDR="$(OPENSBI_FW_JUMP_ADDR)" \
+			FW_JUMP_FDT_ADDR="$(OPENSBI_FW_JUMP_FDT_ADDR)" \
 			CROSS_COMPILE="$(OPENSBI_DOCKER_CROSS_COMPILE)" \
 			O="$(OPENSBI_DOCKER_WS)/$(OPENSBI_BUILD_DIR)"'
 
@@ -329,7 +332,8 @@ DTS := $(OUT_DIR)/virt.dts
 
 QEMU_MACHINE         ?= virt
 QEMU_MACHINE_EXTRAS  ?=
-QEMU_COMMON_OPTS     ?= -nographic -m 128M
+QEMU_MEM             ?= 256M
+QEMU_COMMON_OPTS     ?= -nographic -m $(QEMU_MEM)
 QEMU_SMP_OPTS        ?= -smp $(CPUS)
 
 QEMU      ?= qemu-system-riscv64
@@ -345,21 +349,23 @@ QEMU_GDB_PORT ?= 1234
 .PHONY: qemu debug qemu-dbg gdb
 
 # 启动 QEMU + 自编译 OpenSBI，在 S 模式运行内核
-qemu: $(TARGET) $(DTS) $(OPENSBI_FW_JUMP)
-	@echo "  QEMU  $(TARGET) (OpenSBI: $(OPENSBI_FW_JUMP))"
+qemu: $(TARGET_BIN) $(DTB) $(DTS) $(OPENSBI_FW_JUMP_BIN)
+	@echo "  QEMU  $(TARGET) (OpenSBI: $(OPENSBI_FW_JUMP_BIN))"
 	$(QEMU) $(QEMU_OPTS) \
 		-bios $(OPENSBI_FW_JUMP_BIN) \
-		-kernel $(TARGET)
+		-dtb $(DTB) \
+		-device loader,file=$(TARGET_BIN),addr=$(OPENSBI_FW_JUMP_ADDR)
 
 debug: qemu-dbg
 
 # 调试运行：QEMU 不跑、挂起在 reset，开放 GDB 端口
-qemu-dbg: $(TARGET) $(OPENSBI_FW_JUMP) disasm-all
+qemu-dbg: $(TARGET_BIN) $(DTB) $(OPENSBI_FW_JUMP_BIN) disasm-all
 	@echo "  QEMU-DBG  $(TARGET) (gdb on port $(QEMU_GDB_PORT))"
 	$(QEMU) $(QEMU_OPTS) \
 		-bios $(OPENSBI_FW_JUMP_BIN) \
+		-dtb $(DTB) \
 		-S -gdb tcp::$(QEMU_GDB_PORT) \
-		-kernel $(TARGET)
+		-device loader,file=$(TARGET_BIN),addr=$(OPENSBI_FW_JUMP_ADDR)
 
 gdb: $(TARGET)
 	@echo "  GDB   $(TARGET) (target remote :$(QEMU_GDB_PORT))"
@@ -371,9 +377,8 @@ $(DTS): $(DTB)
 $(DTB):
 	mkdir -p $(OUT_DIR)
 	$(QEMU) \
-		-machine virt,dumpdtb=$@ \
-		-smp $(CPUS) \
-		-nographic -S
+		-machine $(QEMU_MACHINE)$(QEMU_MACHINE_EXTRAS),dumpdtb=$@ \
+		$(QEMU_SMP_OPTS) $(QEMU_COMMON_OPTS) -S
 
 
 # ---------------------------------------------------------------------------

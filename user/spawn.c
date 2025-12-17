@@ -32,7 +32,8 @@ typedef struct {
 } spawn_cfg_t;
 
 static spawn_cfg_t s_spawn_cfg[SPAWN_MAX];
-static int s_spawn_count = 0;
+static int s_spawn_active = 0;
+static int s_spawn_inited = 0;
 
 /* Small helper: write "spawn0" into buf without snprintf. */
 static void
@@ -112,45 +113,69 @@ spawn_usage(void)
       "  - N is capped to SPAWN_MAX\n");
 }
 
-static int
-spawn_add(spawn_mode_t mode, uint32_t sleep_ticks, uint32_t print_every,
-          const char* name_prefix)
+static void
+spawn_init_once(void)
 {
-  if (s_spawn_count >= SPAWN_MAX) return -1;
+  if (s_spawn_inited) return;
+  for (int i = 0; i < SPAWN_MAX; ++i) {
+    s_spawn_cfg[i].wid = i;
+    s_spawn_cfg[i].tid = -1;
+  }
+  s_spawn_active = 0;
+  s_spawn_inited = 1;
+}
 
-  int wid        = s_spawn_count;
-  spawn_cfg_t* c = &s_spawn_cfg[wid];
+static int
+spawn_find_free_wid(void)
+{
+  for (int i = 0; i < SPAWN_MAX; ++i) {
+    if (s_spawn_cfg[i].tid < 0) return i;
+  }
+  return -1;
+}
 
+static void
+spawn_cfg_init(spawn_cfg_t* c, int wid, spawn_mode_t mode, uint32_t sleep_ticks,
+               uint32_t print_every)
+{
   c->wid         = wid;
   c->tid         = -1;
   c->mode        = mode;
   c->sleep_ticks = sleep_ticks;
   c->print_every = print_every;  /* 0 disables printing. */
 
-  /* Adjust work_loops depending on performance: too small spams logs, */
-  /* too large hides migration behavior. */
   c->work_loops  = 200000;
 
   c->last_hart   = -1;
   c->migrations  = 0;
   c->prints      = 0;
+}
+
+static int
+spawn_add(spawn_mode_t mode, uint32_t sleep_ticks, uint32_t print_every,
+          const char* name_prefix)
+{
+  int wid = spawn_find_free_wid();
+  if (wid < 0) return -1;
+
+  spawn_cfg_t* c = &s_spawn_cfg[wid];
+  spawn_cfg_init(c, wid, mode, sleep_ticks, print_every);
 
   static char names[SPAWN_MAX][8];
   make_name(names[wid], (int)sizeof(names[wid]), name_prefix, wid);
 
   tid_t tid = thread_create(spawn_worker, c, names[wid]);
   if (tid < 0) return -2;
-  /* Spawned workers are fire-and-forget: detach to auto-recycle. */
-  thread_detach(tid);
-
   c->tid = (int)tid;
-  s_spawn_count++;
+  s_spawn_active++;
   return c->tid;
 }
 
 void
 spawn(int argc, char** argv)
 {
+  spawn_init_once();
+
   if (argc < 2) {
     spawn_usage();
     return;
@@ -159,11 +184,12 @@ spawn(int argc, char** argv)
   const char* sub = argv[1];
 
   if (!u_strcmp(sub, "list")) {
-    u_printf("spawned=%d\n", s_spawn_count);
+    u_printf("spawned=%d\n", s_spawn_active);
     u_printf(" WID  TID  MODE  LAST_HART  MIGRATIONS  PRINTS\n");
     u_printf(" ---- ---- ----  ---------  ----------  ------\n");
-    for (int i = 0; i < s_spawn_count; ++i) {
+    for (int i = 0; i < SPAWN_MAX; ++i) {
       spawn_cfg_t* c = &s_spawn_cfg[i];
+      if (c->tid < 0) continue;
       u_printf(" %-4d %-4d %-4d  %-9d  %-10u  %-6u\n", c->wid, c->tid,
                (int)c->mode, c->last_hart, (unsigned)c->migrations,
                (unsigned)c->prints);
@@ -172,17 +198,41 @@ spawn(int argc, char** argv)
   }
 
   if (!u_strcmp(sub, "kill")) {
-    /* Reuse the existing kill syscall wrapper (same one cmd_kill uses). */
-    /* Replace with your own helper if it has a different name. */
-    int killed = 0;
-    for (int i = 0; i < s_spawn_count; ++i) {
-      int tid = s_spawn_cfg[i].tid;
-      if (tid >= 0) {
-        thread_kill(tid);  /* Replace with your own helper name if needed. */
-        killed++;
+    /*
+     * Make kill deterministic:
+     *  - do not detach spawn workers
+     *  - kill + join each worker so its TID is actually recycled
+     *  - clear bookkeeping so subsequent spawn/kill only targets new workers
+     */
+    int requested = 0;
+    int joined    = 0;
+    int errors    = 0;
+    for (int i = 0; i < SPAWN_MAX; ++i) {
+      spawn_cfg_t* c = &s_spawn_cfg[i];
+      tid_t tid      = (tid_t)c->tid;
+      if (tid < 0) continue;
+
+      requested++;
+
+      int rc = thread_kill(tid);
+      if (rc < 0) {
+        errors++;
+      } else {
+        int status = 0;
+        rc         = thread_join(tid, &status);
+        if (rc == 0 || rc == -3) {
+          joined++;
+        } else {
+          errors++;
+        }
       }
+
+      /* Clear our bookkeeping so next spawn/kill only targets new workers. */
+      c->tid = -1;
     }
-    u_printf("spawn: kill requested for %d threads\n", killed);
+
+    s_spawn_active = 0;
+    u_printf("spawn: kill requested=%d joined=%d errors=%d\n", requested, joined, errors);
     return;
   }
 
@@ -207,14 +257,14 @@ spawn(int argc, char** argv)
         break;
       }
       if (print_every) {
-        u_printf("spawn: spin wid=%d tid=%d\n", s_spawn_count - 1, tid);
+        u_printf("spawn: spin tid=%d\n", tid);
       }
     }
     return;
   }
 
   if (!u_strcmp(sub, "yield")) {
-    uint32_t print_every = 50;
+    uint32_t print_every = 0;
     if (argc >= 4) print_every = (uint32_t)u_atoi(argv[3]);
 
     for (int i = 0; i < n; ++i) {
@@ -223,13 +273,13 @@ spawn(int argc, char** argv)
         u_puts("spawn: create failed\n");
         break;
       }
-      u_printf("spawn: yield wid=%d tid=%d\n", s_spawn_count - 1, tid);
+      u_printf("spawn: yield tid=%d\n", tid);
     }
     return;
   }
 
   if (!u_strcmp(sub, "sleep")) {
-    uint32_t print_every = 50;
+    uint32_t print_every = 0;
     if (argc < 4) {
       spawn_usage();
       return;
@@ -243,8 +293,7 @@ spawn(int argc, char** argv)
         u_puts("spawn: create failed\n");
         break;
       }
-      u_printf("spawn: sleep wid=%d tid=%d sleep=%u\n", s_spawn_count - 1, tid,
-               (unsigned)sleep_ticks);
+      u_printf("spawn: sleep tid=%d sleep=%u\n", tid, (unsigned)sleep_ticks);
     }
     return;
   }
