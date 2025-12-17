@@ -1,6 +1,6 @@
 # Compile / link flags.
 
-RISCV_ARCH ?= rv64ima_zicsr
+RISCV_ARCH ?= rv64ima_zicsr_zifencei
 RISCV_ABI  ?= lp64
 RISCV_TUNE ?= sifive-7-series
 
@@ -51,4 +51,3 @@ LDFLAGS := \
 ifeq ($(RELEASE),YES)
   LDFLAGS += -flto
 endif
-

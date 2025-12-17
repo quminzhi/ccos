@@ -9,6 +9,9 @@ OPENSBI_PLATFORM  := generic
 OPENSBI_FW_JUMP     := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.elf
 OPENSBI_FW_JUMP_BIN := $(OPENSBI_BUILD_DIR)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.bin
 
+# ISA: 板级 DTS 为 rv64imafd（无 C 扩展），必须禁用 C。
+OPENSBI_PLATFORM_RISCV_ISA ?= rv64imafd_zicsr_zifencei
+
 # Keep in sync with FSBL's staging addresses.
 OPENSBI_FW_TEXT_START    ?= 0x80000000
 OPENSBI_FW_JUMP_ADDR     ?= 0x80200000
@@ -22,6 +25,7 @@ $(OPENSBI_FW_JUMP):
 	@mkdir -p $(OPENSBI_BUILD_DIR)
 	$(MAKE) -C $(OPENSBI_DIR) \
 		PLATFORM=$(OPENSBI_PLATFORM) \
+		PLATFORM_RISCV_ISA=$(OPENSBI_PLATFORM_RISCV_ISA) \
 		FW_JUMP=y \
 		FW_TEXT_START=$(OPENSBI_FW_TEXT_START) \
 		FW_JUMP_ADDR=$(OPENSBI_FW_JUMP_ADDR) \
@@ -63,4 +67,3 @@ docker-opensbi-image:
 docker-opensbi-image-rebuild:
 	@echo "  DOCKER REBUILD $(OPENSBI_DOCKER_IMAGE)"
 	@docker build -t "$(OPENSBI_DOCKER_IMAGE)" -f "$(OPENSBI_DOCKERFILE)" "$(PROJECT_ROOT)"
-
