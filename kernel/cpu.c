@@ -89,11 +89,11 @@ cpu_enter_idle(uint32_t hartid)
    *
    * SMP scheduling (current version):
    *   - Each hart arms its own timer tick (hard preemption).
-   *   - Boot hart advances global time / wakes SLEEPING threads.
-   *   - Any hart making a thread RUNNABLE sends SSIP if target hart is different.
-   *   - All harts must enable SSIP/SEIP/STIP.
-   */
-  platform_timer_start_after(DELTA_TICKS);
+  *   - Boot hart advances global time / wakes SLEEPING threads.
+  *   - Any hart making a thread RUNNABLE sends SSIP if target hart is different.
+  *   - All harts must enable SSIP/SEIP/STIP.
+  */
+  platform_timer_start_after(platform_sched_delta_ticks());
   arch_enable_timer_interrupts();
   arch_enable_external_interrupts();
   arch_enable_software_interrupts();

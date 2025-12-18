@@ -24,6 +24,7 @@ size_t platform_irq_get_stats(platform_irq_stat_t* out, size_t max);
 
 const void *platform_get_dtb(void);
 void platform_set_dtb(uintptr_t dtb_pa);
+uint32_t platform_timebase_hz(void);
 
 /* 输出字符串（当前实现：直接用 QEMU virt 的 UART0 MMIO） */
 void platform_uart_init();
@@ -45,6 +46,7 @@ void platform_idle(void);
 platform_time_t platform_time_now(void);
 void platform_timer_start_after(platform_time_t delta_ticks);
 void platform_timer_start_at(platform_time_t when);
+platform_time_t platform_sched_delta_ticks(void);
 
 void platform_plic_init(void);
 

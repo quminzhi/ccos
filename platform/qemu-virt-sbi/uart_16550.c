@@ -237,7 +237,9 @@ void uart16550_write(const char *buf, size_t len) {
   if (!buf || len == 0) return;
 
   for (size_t i = 0; i < len; ++i) {
-    uart16550_putc(buf[i]);
+    char c = buf[i];
+    if (c == '\n') uart16550_putc('\r');
+    uart16550_putc(c);
   }
 }
 

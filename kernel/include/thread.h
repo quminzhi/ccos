@@ -21,10 +21,6 @@
 #define THREAD_STACK_SIZE 4096
 #endif
 
-#define DELTA_TICKS 100000UL /* ~10ms at 10MHz timebase */
-
-/* Alternative: #define DELTA_TICKS 10000000UL   (~1s) */
-
 /* Basic per-thread state. Keep this struct compact and self-explanatory.
  * Invariants:
  *   - RUNNABLE 当且仅当 on_rq == 1。

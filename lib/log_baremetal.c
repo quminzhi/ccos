@@ -2,10 +2,15 @@
 #include "log.h"
 #include "platform.h"
 
-/* Writer for log system: send a buffer to UART */
+/* Writer for log system: send a buffer to UART with CRLF translation */
 static void log_platform_writer(const char *buf, size_t len)
 {
-  platform_write(buf, len);
+  if (!buf || len == 0) return;
+  for (size_t i = 0; i < len; ++i) {
+    char c = buf[i];
+    if (c == '\n') platform_putc('\r');
+    platform_putc(c);
+  }
 }
 
 #if LOG_ENABLE_TIMESTAMP

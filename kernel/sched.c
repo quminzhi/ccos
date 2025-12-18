@@ -17,7 +17,7 @@
  */
 
 static inline void sched_rearm_timer(void) {
-  platform_timer_start_after(DELTA_TICKS);
+  platform_timer_start_after(platform_sched_delta_ticks());
 }
 
 void

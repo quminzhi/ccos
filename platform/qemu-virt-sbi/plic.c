@@ -1,9 +1,11 @@
 #include "plic.h"
 #include "platform.h"    /* platform_get_dtb() */
 #include "fdt_helper.h"  /* fdt_find_reg_by_compat() */
+#include "libfdt.h"      /* fdt_node_offset_by_compatible, fdt32_t */
 #include "cpu.h"         /* cpu_current_hartid() */
 
-static uintptr_t plic_base;  /* runtime PLIC MMIO base */
+static uintptr_t plic_base;       /* runtime PLIC MMIO base */
+static uint32_t plic_num_sources; /* number of interrupt sources (from FDT) */
 
 static inline void w32(uint32_t off, uint32_t v) {
   *(volatile uint32_t *)(plic_base + off) = v;
@@ -70,10 +72,32 @@ static void plic_ensure_base(void) {
   uint64_t base, size;
 
   /* QEMU virt 的 PLIC compatible 可能是 "riscv,plic0" 或 "sifive,plic-1.0.0" */
-  if (fdt_find_reg_by_compat(fdt, "riscv,plic0", &base, &size) < 0 &&
-      fdt_find_reg_by_compat(fdt, "sifive,plic-1.0.0", &base, &size) < 0) {
-    /* 找不到就保持 plic_base = 0，上层调用最好检查是否有 PLIC */
-    return;
+  int plic_off = fdt_node_offset_by_compatible(fdt, -1, "riscv,plic0");
+  int compat_fallback = 0;
+  if (plic_off < 0) {
+    plic_off        = fdt_node_offset_by_compatible(fdt, -1, "sifive,plic-1.0.0");
+    compat_fallback = 1;
+  }
+
+  if (plic_off < 0) {
+    return;  /* no PLIC node */
+  }
+
+  if (compat_fallback) {
+    if (fdt_find_reg_by_compat(fdt, "sifive,plic-1.0.0", &base, &size) < 0) return;
+  } else {
+    if (fdt_find_reg_by_compat(fdt, "riscv,plic0", &base, &size) < 0) return;
+  }
+
+  /* Optional: riscv,ndev tells us how many sources exist. Default to 32. */
+  plic_num_sources = 32;
+  int len               = 0;
+  const fdt32_t *ndev_p = (const fdt32_t *)fdt_getprop(fdt, plic_off, "riscv,ndev", &len);
+  if (ndev_p && len >= (int)sizeof(fdt32_t)) {
+    uint32_t n = fdt32_to_cpu(ndev_p[0]);
+    if (n > 0) {
+      plic_num_sources = n;
+    }
   }
 
   plic_base = (uintptr_t)base;
@@ -113,33 +137,40 @@ void plic_set_priority(uint32_t irq, uint32_t prio) {
 
 /*
  * 为“当前 hart”的 S-mode context 打开 / 关闭某个 IRQ。
- * 目前我们只使用前 32 个 IRQ，足够 UART / RTC / 简单 virtio。
  */
 
 void plic_enable_irq(uint32_t irq) {
-  if (irq >= 32) return;
+  if (irq == 0) return;
   plic_ensure_base();
   if (plic_base == 0) return;
+  if (plic_num_sources && irq > plic_num_sources) return;
 
   uint32_t hartid = cpu_current_hartid();
   uint32_t en_off = plic_senable_offset_for_hart(hartid);
 
-  uint32_t en     = r32(en_off);
-  en |= (1u << irq);
-  w32(en_off, en);
+  uint32_t word_off = en_off + 4u * (irq / 32u);
+  uint32_t bit      = irq % 32u;
+
+  uint32_t en = r32(word_off);
+  en |= (1u << bit);
+  w32(word_off, en);
 }
 
 void plic_disable_irq(uint32_t irq) {
-  if (irq >= 32) return;
+  if (irq == 0) return;
   plic_ensure_base();
   if (plic_base == 0) return;
+  if (plic_num_sources && irq > plic_num_sources) return;
 
   uint32_t hartid = cpu_current_hartid();
   uint32_t en_off = plic_senable_offset_for_hart(hartid);
 
-  uint32_t en     = r32(en_off);
-  en &= ~(1u << irq);
-  w32(en_off, en);
+  uint32_t word_off = en_off + 4u * (irq / 32u);
+  uint32_t bit      = irq % 32u;
+
+  uint32_t en = r32(word_off);
+  en &= ~(1u << bit);
+  w32(word_off, en);
 }
 
 /*

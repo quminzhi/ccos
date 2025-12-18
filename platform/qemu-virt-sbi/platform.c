@@ -12,6 +12,7 @@
 #include "libfdt.h"
 
 static const void* g_dtb;  /* Cached DTB pointer */
+static uint32_t g_timebase_hz;   /* Cached /cpus/timebase-frequency */
 
 const void* platform_get_dtb(void) {
   return g_dtb;
@@ -32,6 +33,29 @@ void platform_set_dtb(uintptr_t dtb_pa) {
   if (g_dtb != new_dtb) {
     panic("platform_set_dtb: dtb mismatch");
   }
+}
+
+uint32_t platform_timebase_hz(void) {
+  if (g_timebase_hz) return g_timebase_hz;
+
+  uint32_t hz = 0;
+  if (g_dtb) {
+    int off = fdt_path_offset(g_dtb, "/cpus");
+    if (off >= 0) {
+      int len = 0;
+      const fdt32_t* p = (const fdt32_t*)fdt_getprop(g_dtb, off,
+                                                     "timebase-frequency",
+                                                     &len);
+      if (p && len >= (int)sizeof(fdt32_t)) {
+        hz = fdt32_to_cpu(p[0]);
+      }
+    }
+  }
+  if (hz == 0) {
+    hz = 10000000u; /* Typical default: 10MHz (QEMU virt uses this) */
+  }
+  g_timebase_hz = hz;
+  return hz;
 }
 
 /* ========== Console output helpers ========== */
@@ -135,6 +159,14 @@ void platform_timer_start_after(platform_time_t delta_ticks) {
   timer_start_after(delta_ticks);
 }
 
+platform_time_t platform_sched_delta_ticks(void) {
+  /* Default: ~1ms interval based on timebase-frequency */
+  uint32_t hz = platform_timebase_hz();
+  platform_time_t ticks = (platform_time_t)(hz / 1000u);
+  if (ticks == 0) ticks = 1; /* floor at 1 tick */
+  return ticks;
+}
+
 /* ========== RTC ========== */
 
 void platform_rtc_init(void) {
@@ -147,25 +179,10 @@ uint64_t platform_rtc_read_ns(void) {
    * RTC via time CSR + timebase-frequency from FDT (or default 10MHz).
    * No external goldfish-rtc dependency.
    */
-  uint32_t hz = 0;
-  if (g_dtb) {
-    int off = fdt_path_offset(g_dtb, "/cpus");
-    if (off >= 0) {
-      int len = 0;
-      const fdt32_t* p = (const fdt32_t*)fdt_getprop(g_dtb, off,
-                                                     "timebase-frequency",
-                                                     &len);
-      if (p && len >= (int)sizeof(fdt32_t)) {
-        hz = fdt32_to_cpu(p[0]);
-      }
-    }
-  }
-  if (hz == 0) {
-    hz = 10000000u; /* Typical default: 10MHz (QEMU virt uses this) */
-  }
+  uint32_t hz = platform_timebase_hz();
 
   if (!fallback_logged) {
-    pr_warn("platform_rtc_read_ns: using time CSR (hz=%u)", hz);
+    pr_info("platform_rtc_read_ns: using time CSR (hz=%u)", hz);
     fallback_logged = 1;
   }
 
