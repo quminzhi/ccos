@@ -93,6 +93,17 @@ static inline void sbi_console_puts(const char *s) {
 #define SBI_FID_HSM_HART_STOP   1
 #define SBI_FID_HSM_HART_STATUS 2
 
+/* HSM status codes (SBI v0.2) */
+#define SBI_HSM_STATUS_STOPPED 0
+#define SBI_HSM_STATUS_STARTING 1
+#define SBI_HSM_STATUS_STARTED 2
+#define SBI_HSM_STATUS_STOPPING 3
+
+/* Stop the calling hart (returns only on error). */
+static inline struct sbiret sbi_hart_stop(void) {
+  return sbi_call(SBI_EID_HSM, SBI_FID_HSM_HART_STOP, 0, 0, 0, 0, 0);
+}
+
 /* 启动一个 hart：
  *   hartid     : 目标 hart id
  *   start_addr : S-mode 入口物理地址（OpenSBI 会跳到这里）
@@ -105,4 +116,10 @@ static inline struct sbiret sbi_hart_start(uint64_t hartid, uint64_t start_addr,
   return sbi_call(SBI_EID_HSM, SBI_FID_HSM_HART_START, (long)hartid,
                   (long)start_addr, 1, /* next_mode = S-mode */
                   (long)opaque, 0);
+}
+
+/* Query hart status (SBI HSM). Returns {error,value=status}. */
+static inline struct sbiret sbi_hart_status(uint64_t hartid) {
+  return sbi_call(SBI_EID_HSM, SBI_FID_HSM_HART_STATUS, (long)hartid, 0, 0, 0,
+                  0);
 }

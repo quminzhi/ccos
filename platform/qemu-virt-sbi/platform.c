@@ -160,9 +160,9 @@ void platform_timer_start_after(platform_time_t delta_ticks) {
 }
 
 platform_time_t platform_sched_delta_ticks(void) {
-  /* Default: ~1ms interval based on timebase-frequency */
-  uint32_t hz = platform_timebase_hz();
-  platform_time_t ticks = (platform_time_t)(hz / 1000u);
+  /* Fixed ~1ms slice based on timebase-frequency */
+  const uint32_t hz = platform_timebase_hz();
+  platform_time_t ticks = (platform_time_t)(hz / 1000u); /* 1ms */
   if (ticks == 0) ticks = 1; /* floor at 1 tick */
   return ticks;
 }

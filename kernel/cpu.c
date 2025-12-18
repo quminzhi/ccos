@@ -25,6 +25,7 @@ static inline void
 smp_set_online(uint32_t hartid)
 {
   g_cpus[hartid].online = 1;
+  smp_mb();
 }
 
 void
@@ -155,4 +156,16 @@ smp_kick_hart(uint32_t hartid)
   if (ret.error) {
     pr_warn("sbi_send_ipi failed: err=%ld target=%u\n", ret.error, hartid);
   }
+}
+
+int
+smp_wait_hart_online(uint32_t hartid, uint64_t timeout_ticks)
+{
+  if (hartid >= (uint32_t)MAX_HARTS) return -1;
+
+  uint64_t start = platform_time_now();
+  while ((platform_time_now() - start) < timeout_ticks) {
+    if (*(volatile uint32_t *)&g_cpus[hartid].online) return 0;
+  }
+  return -1;
 }

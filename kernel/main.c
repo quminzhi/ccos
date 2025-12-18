@@ -19,7 +19,16 @@ static void secondary_main(long hartid, long dtb_pa) __attribute__((noreturn));
 
 void user_main(void *arg) __attribute__((noreturn));
 
-/* -------------------------------------------------------------------------- */
+static const char* hsm_status_str(long st) {
+  switch (st) {
+    case SBI_HSM_STATUS_STOPPED:  return "STOPPED";
+    case SBI_HSM_STATUS_STARTING: return "STARTING";
+    case SBI_HSM_STATUS_STARTED:  return "STARTED";
+    case SBI_HSM_STATUS_STOPPING: return "STOPPING";
+    default: return "unknown";
+  }
+}
+
 /* Early SBI console helpers (no dependency on platform_init/console_init).  */
 static void sbi_put_hex64(uint64_t v) {
   static const char hex[] = "0123456789abcdef";
@@ -76,12 +85,59 @@ void kernel_main(long hartid, long dtb_pa) {
 /* OpenSBI keeps other harts parked in M-mode; need to start them explicitly */
 static void start_other_harts(long dtb_pa) {
   ASSERT(g_boot_hartid != NO_BOOT_HART);
+
+  const uint64_t start_timeout = platform_sched_delta_ticks() * 100u; /* ~100ms */
+
   for (uint32_t h = 0; h < MAX_HARTS; ++h) {
     if (h == (uint32_t)g_boot_hartid) continue;
+
+    struct sbiret st_before = sbi_hart_status(h);
+    if (st_before.error == 0) {
+      pr_info("hart%u status before start: %s (%ld)", h,
+              hsm_status_str(st_before.value), st_before.value);
+    } else {
+      pr_warn("hart%u status query failed: err=%ld", h, st_before.error);
+    }
+
     struct sbiret ret = sbi_hart_start(h, (uintptr_t)secondary_entry,
                                        (uintptr_t)dtb_pa /* opaque -> a1 */);
     if (ret.error != 0) {
       pr_warn("sbi_hart_start(hart=%u) failed: err=%ld\n", h, ret.error);
+    }
+
+    /* Wait a fixed timeout (~100ms) derived from the 1ms scheduler slice. */
+    uint64_t start = platform_time_now();
+    long last_status = -1;
+    long first_started = -1;
+    int online = 0;
+    while ((platform_time_now() - start) < start_timeout) {
+      struct sbiret st = sbi_hart_status(h);
+      if (st.error == 0) {
+        last_status = st.value;
+        if (st.value == SBI_HSM_STATUS_STARTED && first_started == -1) {
+          first_started = st.value;
+        }
+      }
+      if (*(volatile uint32_t *)&g_cpus[h].online) {
+        long st_val = (first_started != -1) ? first_started : last_status;
+        pr_info("hart%u online (HSM=%s/%ld, last=%s/%ld)", h,
+                hsm_status_str(st_val), st_val,
+                hsm_status_str(last_status), last_status);
+        online = 1;
+        break;
+      }
+      /* Some platforms may report STARTED before S-mode sees online flag. */
+      if (st.error == 0 && st.value == SBI_HSM_STATUS_STARTED) {
+        static uint32_t logged_mask = 0;
+        if ((logged_mask & (1u << h)) == 0) {
+          pr_debug("hart%u HSM status=STARTED, waiting for S-mode online", h);
+          logged_mask |= (1u << h);
+        }
+      }
+    }
+    if (!online) {
+      pr_warn("hart%u did not come online; last status=%s/%ld",
+              h, hsm_status_str(last_status), last_status);
     }
   }
 }

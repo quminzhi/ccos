@@ -50,7 +50,24 @@ _start:
 # other harts arrive here without clearing BSS again.
 secondary_entry:
 # a0 = hartid, a1 = dtb_pa (opaque)
-    mv       t3, a0
+    mv       t4, a0                    # preserve hartid
+    mv       t5, a1                    # preserve dtb_pa
+    la       a0, .Lsec_entry_msg
+    call     sbi_puts_asm
+    mv       a0, t4
+    addi     a0, a0, '0'
+    li       a7, 0x4442434e            # SBI DBCN
+    li       a6, 2                     # write_byte
+    ecall
+    li       a0, '\n'
+    li       a7, 0x4442434e
+    li       a6, 2
+    ecall
+    mv       t3, t4
+
+    /* Restore original arguments for kernel_main */
+    mv       a0, t4    # hartid
+    mv       a1, t5    # dtb_pa
 
 per_hart_start:
 # Set up each hart's kernel stack and sscratch.
@@ -65,3 +82,22 @@ per_hart_start:
 
 # Preserve the OpenSBI contract: a0 = hartid, a1 = dtb_pa.
     tail     kernel_main
+
+/* Minimal SBI console puts (no stack needed) */
+sbi_puts_asm:
+    mv       t2, a0
+.Lputs_loop:
+    lbu      a0, 0(t2)
+    beqz     a0, .Lputs_done
+    li       a7, 0x4442434e       # SBI DBCN
+    li       a6, 2                # write_byte
+    ecall
+    addi     t2, t2, 1
+    j        .Lputs_loop
+.Lputs_done:
+    ret
+
+.section .rodata
+.align 2
+.Lsec_entry_msg:
+    .asciz "secondary_entry hart="

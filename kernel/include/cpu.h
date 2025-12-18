@@ -24,7 +24,7 @@ struct cpu {
 
   /* C-managed fields */
   uint32_t hartid;
-  uint32_t online;
+  volatile uint32_t online;
   tid_t    current_tid;
   tid_t    idle_tid;   /* idle tid = hartid */
 
@@ -74,3 +74,4 @@ void set_smp_boot_done(void);
 void wait_for_smp_boot_done(void);
 void smp_kick_all_others(void);
 void smp_kick_hart(uint32_t hartid);
+int  smp_wait_hart_online(uint32_t hartid, uint64_t timeout_ticks);
