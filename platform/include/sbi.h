@@ -94,10 +94,10 @@ static inline void sbi_console_puts(const char *s) {
 #define SBI_FID_HSM_HART_STATUS 2
 
 /* HSM status codes (SBI v0.2) */
-#define SBI_HSM_STATUS_STOPPED 0
-#define SBI_HSM_STATUS_STARTING 1
-#define SBI_HSM_STATUS_STARTED 2
-#define SBI_HSM_STATUS_STOPPING 3
+#define SBI_HSM_STATUS_STARTED 0        /* matches SBI spec */
+#define SBI_HSM_STATUS_STOPPED 1
+#define SBI_HSM_STATUS_START_PENDING 2
+#define SBI_HSM_STATUS_STOP_PENDING 3
 
 /* Stop the calling hart (returns only on error). */
 static inline struct sbiret sbi_hart_stop(void) {
@@ -109,13 +109,13 @@ static inline struct sbiret sbi_hart_stop(void) {
  *   start_addr : S-mode 入口物理地址（OpenSBI 会跳到这里）
  *   opaque     : 会作为 a1 传给新 hart
  *
- * OpenSBI 约定：next_mode = 1 表示 S-mode。
+ * next_mode 由调用者的特权级（MSTATUS.MPP）隐含决定，不在参数里传。
  */
 static inline struct sbiret sbi_hart_start(uint64_t hartid, uint64_t start_addr,
                                            uint64_t opaque) {
+  /* SBI v0.2: a0=hartid, a1=start_addr, a2=opaque */
   return sbi_call(SBI_EID_HSM, SBI_FID_HSM_HART_START, (long)hartid,
-                  (long)start_addr, 1, /* next_mode = S-mode */
-                  (long)opaque, 0);
+                  (long)start_addr, (long)opaque, 0, 0);
 }
 
 /* Query hart status (SBI HSM). Returns {error,value=status}. */

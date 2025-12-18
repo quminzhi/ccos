@@ -49,25 +49,14 @@ _start:
 #   sbi_hart_start(h, secondary_entry, dtb_pa);
 # other harts arrive here without clearing BSS again.
 secondary_entry:
-# a0 = hartid, a1 = dtb_pa (opaque)
-    mv       t4, a0                    # preserve hartid
-    mv       t5, a1                    # preserve dtb_pa
-    la       a0, .Lsec_entry_msg
-    call     sbi_puts_asm
-    mv       a0, t4
-    addi     a0, a0, '0'
-    li       a7, 0x4442434e            # SBI DBCN
-    li       a6, 2                     # write_byte
-    ecall
-    li       a0, '\n'
-    li       a7, 0x4442434e
-    li       a6, 2
-    ecall
-    mv       t3, t4
-
-    /* Restore original arguments for kernel_main */
-    mv       a0, t4    # hartid
-    mv       a1, t5    # dtb_pa
+    # a0 = hartid, a1 = opaque (dtb_pa)
+    # IMPORTANT: do not make SBI calls (ecall) here before we tail into
+    # kernel_main. SBI calls do NOT guarantee preserving caller registers,
+    # so saving a0/a1 in temporaries (t*) and then doing ecalls can corrupt
+    # the dtb pointer.
+    mv       t3, a0    # t3 = hartid (used for per-hart stack selection)
+    # a0/a1 remain intact for kernel_main.
+    j        per_hart_start
 
 per_hart_start:
 # Set up each hart's kernel stack and sscratch.
@@ -97,7 +86,4 @@ sbi_puts_asm:
 .Lputs_done:
     ret
 
-.section .rodata
-.align 2
-.Lsec_entry_msg:
-    .asciz "secondary_entry hart="
+/* NOTE: removed secondary_entry early debug prints to keep a0/a1 intact. */
