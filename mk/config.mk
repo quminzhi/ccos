@@ -4,7 +4,7 @@
 RELEASE ?= NO
 
 # CPU：make CPUS=4
-CPUS ?= 4
+CPUS ?= 2
 
 # 目标配置
 ARCH     := riscv

@@ -15,7 +15,7 @@
 
   * QEMU virt + OpenSBI 下的 **板级支持（BSP）**
   * FDT / libfdt
-  * UART 16550、PLIC、Goldfish RTC、timer（基于 SBI）等
+  * UART 16550、PLIC、timer（基于 SBI time CSR）等
 * **kernel/**
 
   * 调度、线程、syscall、time 子系统等
@@ -52,7 +52,7 @@ void platform_put_hex64(uint64_t x);
 void platform_put_dec_s(int64_t v);
 void platform_put_dec_us(uint64_t x);
 
-/* RTC（Goldfish RTC） */
+/* RTC（基于 time CSR） */
 void     platform_rtc_init(void);
 uint64_t platform_rtc_read_ns(void);
 void     platform_rtc_set_alarm_after(uint64_t delay_ns);
@@ -100,8 +100,8 @@ void kernel_main(long hartid, long dtb_pa)
 
     trap_init();                   // 安装 stvec，准备好 trap 入口
 
-    platform_rtc_init();           // FDT 解析 goldfish-rtc reg+irq
-    platform_timer_init(hartid);   // Timer（内部目前仍用 SBI TIME）
+    platform_rtc_init();           // 依赖 time CSR + timebase-frequency
+    platform_timer_init(hartid);   // Timer（SBI TIME）
     platform_plic_init();          // 初始化 PLIC & IRQ 表
 
     platform_puts("Booting...\n");
@@ -114,7 +114,7 @@ void kernel_main(long hartid, long dtb_pa)
     arch_enable_timer_interrupts();           // 开 S-mode timer 中断
     platform_timer_start_after(DELTA_TICKS);  // 编程下一次调度时间片
 
-    platform_rtc_set_alarm_after(3ULL * 1000 * 1000 * 1000); // RTC 实验
+    platform_rtc_set_alarm_after(3ULL * 1000 * 1000 * 1000); // 可选：基于 time CSR 的闹钟（当前为空实现）
 
     // 启动用户态 shell 线程
     threads_exec(user_main, NULL);
@@ -153,7 +153,6 @@ void kernel_main(long hartid, long dtb_pa)
 
   * UART：`"ns16550a"`
   * PLIC：`"riscv,plic0"` / `"sifive,plic-1.0.0"`
-  * RTC：`"google,goldfish-rtc"` 等
 
 FDT 成为“所有 MMIO base、IRQ 号、设备存在与否”的**唯一来源**。
 
@@ -182,22 +181,11 @@ FDT 成为“所有 MMIO base、IRQ 号、设备存在与否”的**唯一来源
 
 ---
 
-### 4.3 Goldfish RTC：真实世界时间 / alarm
+### 4.3 RTC：基于 time CSR 的时间源
 
-* 从 FDT 解析 compatible `"google,goldfish-rtc"` 的 reg + irq；
-
-* 封装 API：
-
-  * `platform_rtc_read_ns()` → 64bit ns since boot/epoch；
-  * `platform_rtc_set_alarm_after(ns)` → 设置下一次 RTC 中断；
-
-* PLIC 上为 RTC 注册 handler：
-
-  ```c
-  platform_register_irq_handler(rtc_irq, rtc_irq_trampoline, "rtc0");
-  ```
-
-* 内核 time 子系统上层做：
+* 直接使用 time CSR + `/cpus/timebase-frequency` 计算 ns；
+* `platform_rtc_read_ns()` → 64bit ns since boot/epoch；
+* `platform_rtc_set_alarm_after(ns)` 目前为空实现（无外部 RTC 中断）。
 
   * `clock_gettime()`（用户态）通过 syscall 拿到当前 ns；
   * `epoch_to_utc_datetime()` 完成 ns → 年月日时分秒 转换；

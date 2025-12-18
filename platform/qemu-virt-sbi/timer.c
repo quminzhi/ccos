@@ -2,6 +2,7 @@
 #include "fdt_helper.h"
 #include "riscv_csr.h"
 #include "sbi.h"
+#include "platform.h"
 
 /* 在 “OpenSBI + S-mode kernel” 这个架构下，CLINT 这片地址空间是 M 态私有的， */
 /* S 态不能直接读写 0x0200_0000 那一段。 */
@@ -84,7 +85,7 @@ void timer_start_at(platform_time_t when)
   /* if (timer_backend == TIMER_BACKEND_CLINT && clint_mtimecmp) { */
   /*   *clint_mtimecmp = when; */
   /* } else { */
-  sbi_set_timer(when);
+  (void)sbi_call(SBI_EID_TIME, SBI_FID_SET_TIMER, (long)when, 0, 0, 0, 0);
   /* } */
 }
 

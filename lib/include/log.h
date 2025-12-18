@@ -96,6 +96,7 @@ log_path_mode_t log_get_path_mode(void);
 
 /* Convert level to short string ("E", "W", "I", "D", "T"). */
 const char* log_level_to_string(log_level_t level);
+const char* log_level_to_full_string(log_level_t level);
 
 /* Core logging functions (normally use pr_* macros instead). */
 int log_vprintf(log_level_t level, const char* file, int line, const char* func,

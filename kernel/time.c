@@ -4,8 +4,9 @@
 #include <stdint.h>
 
 #include "platform.h"
+#include "log.h"
 
-/* boot 时刻的 “real ns”，用于构造 since-boot */
+/* Real nanoseconds at boot; used to derive since-boot time */
 static uint64_t boot_real_ns;
 
 struct k_timespec {
@@ -46,4 +47,5 @@ void
 time_init(void)
 {
   boot_real_ns = platform_rtc_read_ns();
+  pr_info("time_init: boot_real_ns=%llu", (unsigned long long)boot_real_ns);
 }

@@ -1,15 +1,15 @@
 #ifndef _LIBFDT_ENV_H
 #define _LIBFDT_ENV_H
 
-#include <stddef.h>  // 如果你真的没有，也可以先去掉这一行
+#include <stddef.h>  // Required for size_t; drop if your libc already provides it
 #include <stdint.h>
 #include <string.h>
 
 /*
- * endian 转换：FDT 是 big-endian 格式，这里给出
- * fdt16_to_cpu / fdt32_to_cpu / fdt64_to_cpu 以及反向宏。
+ * Endian helpers: FDT is big-endian; provide fdt16_to_cpu / fdt32_to_cpu /
+ * fdt64_to_cpu and the reverse macros.
  *
- * 这份实现基本来自 Linux 内核的 libfdt_env.h，只做了最小改动。
+ * Derived from Linux libfdt_env.h with minimal changes.
  */
 
 #define EXTRACT_BYTE(n) ((unsigned long long)((uint8_t *)&x)[n])
@@ -39,10 +39,10 @@ static inline uint64_t fdt64_to_cpu(uint64_t x)
 #undef EXTRACT_BYTE
 
 /*
- * libfdt 会用到的内存/字符串操作函数：
+ * Memory/string helpers used by libfdt:
  *   memcmp, memcpy, memmove, memset, strlen
- * 只要你的 string.h 里声明了它们，并且你在别处实现了，
- * 就可以直接用，不需要 stdlib.h 和 malloc/free。
+ * As long as string.h declares them and you implement them elsewhere, you
+ * can use libfdt without stdlib.h or malloc/free.
  */
 
 #endif /* _LIBFDT_ENV_H */

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "platform.h"
 
-/* 简单版 panic：打印 message + 文件名 + 行号，然后停在 S 模式 */
+/* Simple panic: print message + file + line, then halt in S-mode */
 #define panic(msg)                                \
   do {                                            \
     platform_puts("\n!!! KERNEL PANIC !!!\n");    \
@@ -14,7 +14,7 @@
     platform_put_dec_us((uintptr_t)__LINE__);     \
     platform_puts("\n");                          \
     for (;;) {                                    \
-      __asm__ volatile("wfi"); /* 省电地死循环 */ \
+      __asm__ volatile("wfi"); /* Low-power halt loop */ \
     }                                             \
   } while (0)
 

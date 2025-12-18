@@ -19,17 +19,52 @@ static void secondary_main(long hartid, long dtb_pa) __attribute__((noreturn));
 
 void user_main(void *arg) __attribute__((noreturn));
 
+/* -------------------------------------------------------------------------- */
+/* Early SBI console helpers (no dependency on platform_init/console_init).  */
+static void sbi_put_hex64(uint64_t v) {
+  static const char hex[] = "0123456789abcdef";
+  for (int i = 15; i >= 0; --i) {
+    sbi_debug_console_write_byte((uint8_t)hex[(v >> (i * 4)) & 0xf]);
+  }
+}
+
+static void sbi_put_dec(uint64_t v) {
+  char buf[32];
+  int idx = 0;
+  if (v == 0) {
+    sbi_debug_console_write_byte('0');
+    return;
+  }
+  while (v && idx < (int)sizeof(buf)) {
+    buf[idx++] = (char)('0' + (v % 10));
+    v /= 10;
+  }
+  while (--idx >= 0) {
+    sbi_debug_console_write_byte((uint8_t)buf[idx]);
+  }
+}
+
+static void sbi_early_banner(long hartid, long dtb_pa) {
+  sbi_console_puts("kernel_main entry hart=");
+  sbi_put_dec((uint64_t)hartid);
+  sbi_console_puts(" dtb_pa=0x");
+  sbi_put_hex64((uint64_t)dtb_pa);
+  sbi_console_puts("\n");
+}
+
 /*
- * S 模式入口：OpenSBI 会以 S-mode 跳到 _start，
- * start.S 里会清 BSS + 建栈，然后 tail 调用 main(hartid, dtb)
+ * S-mode entry: OpenSBI jumps to _start, start.S clears BSS + builds the stack,
+ * then tail-calls main(hartid, dtb).
  */
 void kernel_main(long hartid, long dtb_pa) {
+  sbi_early_banner(hartid, dtb_pa);
+
   uint32_t my_hartid = (uint32_t)hartid;
   uint32_t expected  = NO_BOOT_HART;
 
   cpu_init_this_hart(hartid);
 
-  /* 第一个set g_boot_hartid的就是logic boot hart */
+  /* First hart to set g_boot_hartid becomes the logical boot hart */
   if (__sync_bool_compare_and_swap(&g_boot_hartid, expected, my_hartid)) {
     primary_main(hartid, dtb_pa);
   } else {
@@ -38,7 +73,7 @@ void kernel_main(long hartid, long dtb_pa) {
   }
 }
 
-/* opensbi: 其他hart在M模式等待，需要显示开启 */
+/* OpenSBI keeps other harts parked in M-mode; need to start them explicitly */
 static void start_other_harts(long dtb_pa) {
   ASSERT(g_boot_hartid != NO_BOOT_HART);
   for (uint32_t h = 0; h < MAX_HARTS; ++h) {
@@ -53,13 +88,13 @@ static void start_other_harts(long dtb_pa) {
 
 void primary_main(long hartid, long dtb_pa) {
   /*
-   * 启动流程（专业版小结）：
-   *   1) boot hart: 平台初始化 + 注册 IRQ + trap + 日志 + 时间子系统 + 线程。
-   *   2) boot hart: 标记 smp_boot_done，然后用 SBI HSM 启动其它 hart。
-   *   3) secondary hart: 走 platform_secondary_hart_init() + trap_init()，打开
-   *      SSIP/STIP/SEIP，进入 idle，等待 IPI / timer / PLIC 抢占。
-   *   4) 调度策略：只有 boot hart 周期性 tick；谁让线程 RUNNABLE，谁给其它在线
-   *      hart 发送 IPI（SSIP），把它们从 WFI 拉出来 schedule。
+   * Boot flow:
+   *   1) Boot hart: init platform + IRQ + trap + logging + time + threads.
+   *   2) Boot hart: mark smp_boot_done, then start other harts via SBI HSM.
+   *   3) Secondary hart: run platform_secondary_hart_init() + trap_init(), enable
+   *      SSIP/STIP/SEIP, enter idle and wait for IPI/timer/PLIC.
+   *   4) Scheduling: only the boot hart drives periodic ticks; whoever makes a
+   *      thread RUNNABLE wakes the target hart via IPI (SSIP).
    */
   platform_init((uintptr_t)hartid, (uintptr_t)dtb_pa);
   platform_boot_hart_init((uintptr_t)hartid);
@@ -69,9 +104,11 @@ void primary_main(long hartid, long dtb_pa) {
 
   trap_init();
   console_init();  /* console layer on uart */
+
   log_init_baremetal();
 
   time_init();
+
   threads_init(user_main);
 
   set_smp_boot_done();

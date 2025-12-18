@@ -3,12 +3,12 @@
 
 #ifndef __cplusplus
 
-/* C23 及之后: bool/true/false 都是关键字，不能再 typedef / #define */
+/* C23 and later: bool/true/false are keywords; no typedef/#define needed */
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
 
-/* 什么都不用做，直接用语言内置的 bool/true/false 即可 */
+/* Nothing to do; use the language built-ins */
 
-#else /* C99/C11/C17 等老标准 */
+#else /* Older standards: C99/C11/C17 */
 
 typedef _Bool bool;
 #define true                          1

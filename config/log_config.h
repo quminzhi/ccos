@@ -18,5 +18,7 @@ extern spinlock_t g_log_lock;
 #define LOG_RUNTIME_DEFAULT_LEVEL LOG_LEVEL_DEBUG
 #define LOG_DEFAULT_PATH_MODE     LOG_PATH_BASENAME
 #define LOG_ENABLE_TIMESTAMP      0
+/* 打印等级时使用全名（DEBUG/INFO/TRACE）而非缩写 */
+#define LOG_LEVEL_USE_FULL_NAME   1
 
 #endif  /* BAREMETAL_LOG_CONFIG_H */

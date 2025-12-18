@@ -133,8 +133,7 @@ void platform_plic_init(void)
   uint32_t uart_irq = uart16550_get_irq();
   platform_register_irq_handler(uart_irq, uart16550_irq_handler, NULL, "uart0");
 
-  uint32_t rtc_irq = goldfish_rtc_get_irq();
-  platform_register_irq_handler(rtc_irq, goldfish_rtc_irq_handler, NULL, "rtc0");
+  /* RTC removed: no RTC IRQ registration */
 }
 
 void platform_init(uintptr_t hartid, uintptr_t dtb_pa)

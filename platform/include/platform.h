@@ -34,7 +34,7 @@ void platform_put_hex64(uint64_t x);
 void platform_put_dec_s(int64_t v);
 void platform_put_dec_us(uint64_t x);
 
-/* goldfish_rtc */
+/* RTC (time CSR-based) */
 void platform_rtc_init(void);
 uint64_t platform_rtc_read_ns(void);
 void platform_rtc_set_alarm_after(uint64_t delay_ns);

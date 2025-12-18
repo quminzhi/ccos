@@ -10,12 +10,12 @@ void *memmove(void *dest, const void *src, size_t n)
   }
 
   if (d < s) {
-    // 前向拷贝
+    // Forward copy
     for (size_t i = 0; i < n; i++) {
       d[i] = s[i];
     }
   } else {
-    // 反向拷贝（处理重叠区域）
+    // Backward copy (for overlapping regions)
     for (size_t i = n; i > 0; i--) {
       d[i - 1] = s[i - 1];
     }
@@ -105,7 +105,7 @@ char *strrchr(const char *s, int c)
     }
   }
   if (ch == '\0') {
-    return (char *)s;  // 指向字符串末尾的 '\0'
+    return (char *)s;  // Points to the trailing '\0'
   }
   return (char *)last;
 }
