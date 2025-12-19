@@ -1,6 +1,6 @@
 # OpenSBI integration.
 
-.PHONY: opensbi docker-opensbi docker-opensbi-image docker-opensbi-image-rebuild
+.PHONY: opensbi opensbi-warm-offset docker-opensbi docker-opensbi-image docker-opensbi-image-rebuild
 
 OPENSBI_DIR       := opensbi
 OPENSBI_BUILD_DIR := $(BUILD_DIR)/opensbi
@@ -18,6 +18,12 @@ OPENSBI_FW_JUMP_ADDR     ?= 0x80200000
 OPENSBI_FW_JUMP_FDT_ADDR ?= 0x88000000
 
 opensbi: $(TMP_DIR) $(OPENSBI_FW_JUMP)
+
+opensbi-warm-offset: $(OPENSBI_FW_JUMP)
+	@python3 $(PROJECT_ROOT)/scripts/opensbi_warm_offset.py \
+		--nm $(OPENSBI_CROSS_COMPILE)nm \
+		--elf $(OPENSBI_FW_JUMP) \
+		--base $(OPENSBI_FW_TEXT_START)
 
 $(OPENSBI_FW_JUMP):
 	@echo "  OPENSBI PLATFORM=$(OPENSBI_PLATFORM) FW_JUMP=y"

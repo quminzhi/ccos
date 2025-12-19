@@ -114,7 +114,7 @@ start_other_harts(long dtb_pa) {
       pr_warn("hart%u status query failed: err=%ld", h, st_before.error);
     }
 
-    pr_info(
+    pr_debug(
         "sbi_hart_start args: hart=%ld start=%p opaque=%p", h, secondary_entry, (void *) dtb_pa);
     struct sbiret ret
         = sbi_hart_start(h, (uintptr_t) secondary_entry, (uintptr_t) dtb_pa /* opaque -> a1 */);
