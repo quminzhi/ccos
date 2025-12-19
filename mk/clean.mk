@@ -1,4 +1,4 @@
-.PHONY: clean clean-kernel clean-opensbi distclean
+.PHONY: clean clean-kernel distclean
 
 clean: clean-kernel
 
@@ -7,13 +7,6 @@ clean-kernel:
 	rm -rf $(OBJ_DIR) $(DUMP_DIR) $(OUT_DIR) \
 	       $(TARGET_DISASM) $(TARGET_SYMS)
 
-clean-opensbi:
-	@echo "  CLEAN OpenSBI artifacts"
-	$(MAKE) -C $(OPENSBI_DIR) \
-		O=$(abspath $(OPENSBI_BUILD_DIR)) \
-		clean || true
-
 distclean: clean-kernel
-	@echo "  DISTCLEAN kernel + OpenSBI"
-	rm -rf $(OPENSBI_BUILD_DIR)
-
+	@echo "  DISTCLEAN kernel artifacts"
+	rm -rf $(TMP_DIR)

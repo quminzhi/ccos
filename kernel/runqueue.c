@@ -37,7 +37,7 @@ rq_push_tail(uint32_t hartid, tid_t tid)
 {
   if (hartid >= (uint32_t)MAX_HARTS) return;
   if (tid < 0 || tid >= THREAD_MAX) return;
-  if (tid < (tid_t)MAX_HARTS) return;  /* 不把 idle 放进 rq */
+  if (tid < (tid_t)MAX_HARTS) return;  /* Do not put idle threads into rq */
 
   runqueue_t* r = rq(hartid);
   Thread* t     = &g_threads[tid];

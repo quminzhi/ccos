@@ -6,10 +6,10 @@
 #define CONSOLE_RBUF_SIZE 1024
 
 static char g_rx_buf[CONSOLE_RBUF_SIZE];
-static volatile uint32_t g_rx_head = 0;  /* 下一个写位置 */
-static volatile uint32_t g_rx_tail = 0;  /* 下一个读位置 */
+static volatile uint32_t g_rx_head = 0;  /* next write position */
+static volatile uint32_t g_rx_tail = 0;  /* next read position */
 
-/* 当前有哪个线程在等 stdin？没有则为 -1 */
+/* Which thread is waiting for stdin? -1 means none. */
 tid_t g_stdin_waiter               = -1;
 
 static inline int rb_is_empty(void) { return g_rx_head == g_rx_tail; }
@@ -25,10 +25,10 @@ void console_init(void)
   g_stdin_waiter        = -1;
 }
 
-/* 给内核 / sys_write 用的输出 */
+/* Output for kernel / sys_write. */
 void console_write(const char *buf, size_t len) { uart16550_write(buf, len); }
 
-/* 非阻塞读：尽量从 ring buffer 拿数据 */
+/* Non-blocking read: try to consume from ring buffer. */
 int console_read_nonblock(char *buf, size_t len)
 {
   size_t n = 0;
@@ -39,16 +39,16 @@ int console_read_nonblock(char *buf, size_t len)
   return (int)n;
 }
 
-/* 中断上下文调用：把字符塞进 ring buffer */
+/* IRQ context: push a character into the ring buffer. */
 void console_on_char_from_irq(uint8_t ch)
 {
-  /* 1. 先塞到 ring buffer（满了就丢） */
+  /* 1. Push into ring buffer (drop if full). */
   if (!rb_is_full()) {
     g_rx_buf[g_rx_head] = (char)ch;
     g_rx_head           = (g_rx_head + 1) % CONSOLE_RBUF_SIZE;
   }
 
-  /* 2. 如果当前没有人在等 stdin，就先存着 */
+  /* 2. If nobody is waiting for stdin, just keep it buffered. */
   if (g_stdin_waiter < 0) {
     return;
   }
