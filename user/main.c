@@ -1,7 +1,5 @@
-#include "log.h"
 #include "shell.h"
 #include "syscall.h"
-#include "thread.h"
 #include "ulib.h"
 
 void user_main(void *arg) __attribute__((noreturn));

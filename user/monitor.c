@@ -177,7 +177,18 @@ int mon_stop(tid_t tid) {
   if (m) {
     m->used = 0;  /* Let it exit cooperatively if it wakes up. */
   }
-  return thread_kill(tid);  /* Fallback: issue a kill directly. */
+  int rc = thread_kill(tid);  /* Fallback: issue a kill directly. */
+  if (rc == 0) {
+    int status = 0;
+    int join_rc = thread_join(tid, &status);
+    if (join_rc < 0 && join_rc != -3) {
+      rc = join_rc;
+    }
+  }
+  if (m) {
+    m->tid = -1;
+  }
+  return rc;
 }
 
 void mon_list(void) {
