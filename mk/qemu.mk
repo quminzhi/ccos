@@ -2,9 +2,10 @@
 
 .PHONY: qemu debug qemu-dbg gdb
 
-# OpenSBI fw_jump (built at repo root).
+# OpenSBI fw_jump (built out-of-tree under firmware/opensbi/out by default).
 OPENSBI_PLATFORM ?= generic
-OPENSBI_FW_JUMP_BIN ?= $(REPO_ROOT)/out/opensbi/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.bin
+OPENSBI_OUT ?= $(REPO_ROOT)/firmware/opensbi/out
+OPENSBI_FW_JUMP_BIN ?= $(OPENSBI_OUT)/platform/$(OPENSBI_PLATFORM)/firmware/fw_jump.bin
 OPENSBI_FW_JUMP_ADDR ?= 0x80200000
 
 QEMU_OPTS = -machine $(QEMU_MACHINE)$(QEMU_MACHINE_EXTRAS) \
@@ -44,4 +45,5 @@ $(DTB):
 		$(QEMU_SMP_OPTS) $(QEMU_COMMON_OPTS) -S
 
 $(OPENSBI_FW_JUMP_BIN):
-	$(MAKE) -C $(REPO_ROOT) opensbi REPO_ROOT=$(REPO_ROOT)
+	$(MAKE) -f $(REPO_ROOT)/firmware/opensbi/integration/opensbi.mk opensbi \
+		REPO_ROOT=$(REPO_ROOT) OUT=$(OPENSBI_OUT)
