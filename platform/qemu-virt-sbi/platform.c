@@ -159,6 +159,10 @@ void platform_timer_start_after(platform_time_t delta_ticks) {
   timer_start_after(delta_ticks);
 }
 
+void platform_timer_stop(void) {
+  timer_stop();
+}
+
 platform_time_t platform_sched_delta_ticks(void) {
   /* Fixed ~1ms slice based on timebase-frequency */
   const uint32_t hz = platform_timebase_hz();

@@ -23,6 +23,65 @@ extern void trap_entry(void);
 static void dump_trap(struct trapframe *tf);
 static void dump_backtrace_from_tf(const struct trapframe *tf, tid_t tid);
 
+/* Non-fatal illegal-instruction probe.
+ * Used to detect whether specific privileged instructions are supported by the
+ * core/privileged ISA without crashing the kernel during bring-up.
+ */
+static volatile int g_illegal_probe_enabled;
+static volatile int g_illegal_probe_hit;
+static volatile int g_wfi_probe_enabled;
+static volatile int g_wfi_probe_fired;
+static volatile uintptr_t g_wfi_probe_pc;
+
+/* Early bootstrap trapframe (used before scheduler installs a real one). */
+static struct trapframe g_bootstrap_tf;
+
+void
+trap_install_bootstrap_tf(void) {
+  cpu_this()->cur_tf = &g_bootstrap_tf;
+}
+
+void
+trap_illegal_probe_enable(void) {
+  g_illegal_probe_enabled = 1;
+}
+
+void
+trap_illegal_probe_disable(void) {
+  g_illegal_probe_enabled = 0;
+}
+
+void
+trap_illegal_probe_clear(void) {
+  g_illegal_probe_hit = 0;
+}
+
+int
+trap_illegal_probe_hit(void) {
+  return g_illegal_probe_hit != 0;
+}
+
+void
+trap_wfi_probe_enable(void) {
+  g_wfi_probe_enabled = 1;
+  g_wfi_probe_fired = 0;
+}
+
+void
+trap_wfi_probe_disable(void) {
+  g_wfi_probe_enabled = 0;
+}
+
+int
+trap_wfi_probe_fired(void) {
+  return g_wfi_probe_fired != 0;
+}
+
+void
+trap_wfi_probe_set_pc(uintptr_t pc) {
+  g_wfi_probe_pc = pc;
+}
+
 void
 trap_init(void)
 {
@@ -190,6 +249,15 @@ trap_entry_c(struct trapframe *tf)
         sched_on_ipi_irq(tf);
         goto handled;
       case IRQ_TIMER_S:
+        if (g_wfi_probe_enabled) {
+          /* Re-arm timer to clear STIP and avoid trap storms during probe. */
+          platform_timer_start_after(platform_sched_delta_ticks() * 100u);
+          g_wfi_probe_fired = 1;
+          if (tf->sepc == g_wfi_probe_pc) {
+            tf->sepc += 4;
+          }
+          goto handled;
+        }
         /* S-mode timer interrupt */
         sched_on_timer_irq(tf);  /* 内部可能调用 schedule() */
         goto handled;
@@ -208,6 +276,11 @@ trap_entry_c(struct trapframe *tf)
         breakpoint_handler(tf);
         goto handled;
       case EXC_ILLEGAL_INSTR:
+        if ((sstatus & SSTATUS_SPP) != 0 && g_illegal_probe_enabled) {
+          g_illegal_probe_hit = 1;
+          tf->sepc += 4;
+          goto handled;
+        }
         platform_puts("Illegal instruction\n");
         if ((sstatus & SSTATUS_SPP) == 0) {
           /* 对用户态非法指令，终止当前线程（类似 SIGILL） */

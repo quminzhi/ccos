@@ -19,3 +19,7 @@ else
   GDB := gdb-multiarch
 endif
 
+# ---- Diagnostics (mk/common.mk helper targets) ----
+PRINT_CONFIG_VARS := BOARD PLATFORM CROSS_COMPILE OPENSBI_CROSS_COMPILE BUILD_DIR OUT_DIR
+TOOLCHAIN_PREFIXES := $(CROSS_COMPILE) $(OPENSBI_CROSS_COMPILE)
+TOOLCHAIN_TOOLS := gcc ld objdump objcopy nm size

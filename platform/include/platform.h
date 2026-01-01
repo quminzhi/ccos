@@ -46,6 +46,7 @@ void platform_idle(void);
 platform_time_t platform_time_now(void);
 void platform_timer_start_after(platform_time_t delta_ticks);
 void platform_timer_start_at(platform_time_t when);
+void platform_timer_stop(void);
 platform_time_t platform_sched_delta_ticks(void);
 
 void platform_plic_init(void);

@@ -94,3 +94,9 @@ void timer_start_after(platform_time_t delta_ticks)
   platform_time_t now = timer_now();
   timer_start_at(now + delta_ticks);
 }
+
+void timer_stop(void)
+{
+  /* SBI spec: set_timer(~0) disables timer interrupts and clears pending. */
+  timer_start_at((platform_time_t)(-1));
+}

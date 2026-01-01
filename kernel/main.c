@@ -7,6 +7,7 @@
 #include "kernel.h"
 #include "log.h"
 #include "platform.h"
+#include "probe_illegal.h"
 #include "sbi.h"
 #include "thread.h"
 #include "time.h"
@@ -183,9 +184,12 @@ primary_main(long hartid, long dtb_pa) {
   platform_puts("Booting...\n");
 
   trap_init();
+  trap_install_bootstrap_tf();
   console_init(); /* console layer on uart */
 
   log_init_baremetal();
+
+  probe_privileged_isa();
 
   time_init();
 

@@ -55,4 +55,24 @@ _Static_assert(sizeof(struct trapframe) == 288, "tf size mismatch");
 void trap_init(void);
 struct trapframe *trap_entry_c(struct trapframe *tf);
 
+/* Illegal-instruction probe helpers (used for bring-up diagnostics).
+ *
+ * When enabled, illegal instruction traps from S-mode kernel code are
+ * converted into a non-fatal event: the trap handler will advance sepc by 4
+ * and resume execution.
+ */
+void trap_illegal_probe_enable(void);
+void trap_illegal_probe_disable(void);
+void trap_illegal_probe_clear(void);
+int trap_illegal_probe_hit(void);
+
+void trap_wfi_probe_enable(void);
+void trap_wfi_probe_disable(void);
+int trap_wfi_probe_fired(void);
+void trap_wfi_probe_set_pc(uintptr_t pc);
+
+/* Provide a temporary trapframe early in boot to avoid spinning in trap.S
+ * before scheduler installs per-thread trapframes. */
+void trap_install_bootstrap_tf(void);
+
 #endif

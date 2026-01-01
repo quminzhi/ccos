@@ -1,8 +1,9 @@
-# Repo root detection for CCOS helper targets (e.g., QEMU/OpenSBI integration).
+# Repo root detection (shared helper).
 #
-# - When invoked from the top-level repo, the root Makefile passes REPO_ROOT=...
-# - When invoked directly under kernels/ccos, derive REPO_ROOT by stripping the
-#   known suffix from this file path (no parent-directory segments).
+# - Centralizes REPO_ROOT/BOARD/CROSS_COMPILE defaults via mk/common.mk.
+# - Callers can set DEFAULT_* before including this file.
 
 CCOS_MK_DIR := $(patsubst %/,%,$(abspath $(dir $(lastword $(MAKEFILE_LIST)))))
-REPO_ROOT ?= $(patsubst %/kernels/ccos/mk,%,$(CCOS_MK_DIR))
+COMMON_MK := $(CCOS_MK_DIR)/../../../mk/common.mk
+include $(COMMON_MK)
+$(eval $(call apply_defaults))

@@ -10,6 +10,8 @@ help:
 	@echo "  gdb           Attach GDB to qemu-dbg (port $(QEMU_GDB_PORT))"
 	@echo "  clean         Remove kernel build artifacts"
 	@echo "  distclean     Clean kernel artifacts"
+	@echo "  print-config  Print resolved vars"
+	@echo "  toolchain-check  Check toolchains"
 	@echo ""
 	@echo "Common variables:"
 	@echo "  CPUS=<n>      Number of harts (default: $(CPUS))"
