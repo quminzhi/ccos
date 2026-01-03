@@ -6,4 +6,5 @@
 CCOS_MK_DIR := $(patsubst %/,%,$(abspath $(dir $(lastword $(MAKEFILE_LIST)))))
 COMMON_MK := $(CCOS_MK_DIR)/../../../mk/common.mk
 include $(COMMON_MK)
+include $(REPO_ROOT)/mk/build.mk
 $(eval $(call apply_defaults))

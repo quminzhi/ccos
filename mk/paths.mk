@@ -1,6 +1,7 @@
-# Directory / target names. All outputs go to build/.
+# Directory / target names. All outputs go under OUT (default: out/ccos/<board>).
 
-BUILD_DIR := build
+OUT ?= $(call out_dir,ccos,$(BOARD))
+BUILD_DIR ?= $(OUT)
 OBJ_DIR   := $(BUILD_DIR)/obj
 DUMP_DIR  := $(BUILD_DIR)/dump
 OUT_DIR   := $(BUILD_DIR)/out
@@ -39,4 +40,3 @@ OBJS := $(patsubst %.S, $(OBJ_DIR)/%.o, $(OBJS))
 DEPS := $(OBJS:.o=.d)
 
 OBJ_DUMPS := $(patsubst $(OBJ_DIR)/%.o, $(DUMP_DIR)/%.objdump, $(OBJS))
-

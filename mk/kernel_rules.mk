@@ -2,7 +2,12 @@
 
 all: build
 
-build: $(TMP_DIR) $(TARGET) $(TARGET_BIN) disasm-all symbols objdump-objs size
+DEBUG_ARTIFACTS :=
+ifneq ($(RELEASE),YES)
+  DEBUG_ARTIFACTS := disasm-all symbols objdump-objs
+endif
+
+build: $(TMP_DIR) $(TARGET) $(TARGET_BIN) $(DEBUG_ARTIFACTS) size
 
 $(TMP_DIR):
 	@mkdir -p $@
@@ -11,6 +16,10 @@ $(TARGET): $(OBJS)
 	@mkdir -p $(dir $@)
 	@echo "  LD    $@"
 	$(LD) $(CFLAGS) $(OBJS) -o $@ $(LDFLAGS)
+ifeq ($(RELEASE),YES)
+	@echo "  STRIP $@"
+	$(STRIP) --strip-all $@
+endif
 
 $(TARGET_BIN): $(TARGET)
 	@echo "  OBJCOPY  $@"
@@ -60,4 +69,3 @@ debug-sources:
 	@echo "LIB_SRCS      = $(LIB_SRCS)"
 	@echo "SRCS          = $(SRCS)"
 	@echo "OBJS          = $(OBJS)"
-

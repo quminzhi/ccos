@@ -16,5 +16,6 @@ help:
 	@echo "Common variables:"
 	@echo "  CPUS=<n>      Number of harts (default: $(CPUS))"
 	@echo "  RELEASE=YES   Enable release flags"
+	@echo "  BUILD=DEBUG|RELEASE (default DEBUG; RELEASE=YES also works)"
 	@echo "  QEMU_MEM=256M QEMU memory size"
 	@echo "  CROSS_COMPILE=<prefix>        Kernel toolchain prefix"

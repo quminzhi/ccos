@@ -1,7 +1,7 @@
 # Global configuration knobs.
 
 # Debug / Release 模式：make RELEASE=YES 切到 Release
-RELEASE ?= NO
+RELEASE ?= $(if $(filter RELEASE,$(BUILD)),YES,NO)
 
 # CPU：make CPUS=4
 CPUS ?= 2
@@ -20,4 +20,3 @@ QEMU_SMP_OPTS       ?= -smp $(CPUS)
 
 QEMU          ?= qemu-system-riscv64
 QEMU_GDB_PORT ?= 1234
-
